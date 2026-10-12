@@ -12,7 +12,7 @@ export async function sendApplicationEmail(opts: {
   to: string;
   subject: string;
   body: string;
-  attachment: { filename: string; base64: string } | null;
+  attachments: { filename: string; content: Buffer }[];
 }): Promise<void> {
   const user = requireEnv("GMAIL_USER");
   const transport = nodemailer.createTransport({
@@ -25,14 +25,6 @@ export async function sendApplicationEmail(opts: {
     replyTo: opts.replyTo || undefined,
     subject: opts.subject,
     text: opts.body,
-    attachments: opts.attachment
-      ? [
-          {
-            filename: opts.attachment.filename,
-            content: Buffer.from(opts.attachment.base64, "base64"),
-            contentType: "application/pdf",
-          },
-        ]
-      : [],
+    attachments: opts.attachments.map((a) => ({ ...a, contentType: "application/pdf" })),
   });
 }

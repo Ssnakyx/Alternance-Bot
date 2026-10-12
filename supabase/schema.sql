@@ -31,14 +31,24 @@ create table if not exists offers (
   scored_at timestamptz,
   status text not null default 'new' check (status in
     ('new', 'draft', 'sent', 'followed_up', 'interview', 'accepted', 'rejected', 'ignored')),
-  letter_subject text,
-  letter text,
+  letter_subject text, -- email d'accompagnement : objet
+  letter text,         -- email d'accompagnement : message
+  cover_letter_title text, -- lettre de motivation (jointe en PDF)
+  cover_letter text,
+  short_message text,  -- pour les formulaires en ligne ou LinkedIn
+  tailored_cv jsonb,   -- CV adapté à l'offre par l'IA
   sent_at timestamptz,
   followed_up_at timestamptz,
   responded_at timestamptz,
   notes text not null default '',
   created_at timestamptz not null default now()
 );
+
+-- Pour une base créée avant l'ajout du dossier de candidature.
+alter table offers add column if not exists cover_letter_title text;
+alter table offers add column if not exists cover_letter text;
+alter table offers add column if not exists short_message text;
+alter table offers add column if not exists tailored_cv jsonb;
 
 create index if not exists offers_status_score_idx on offers (status, score desc);
 

@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // Génération des PDF (CV adapté, lettre) côté serveur : le paquet est chargé tel quel par Node.
+  serverExternalPackages: ["@react-pdf/renderer"],
   partialPrefetching: true,
   experimental: {
     serverActions: {

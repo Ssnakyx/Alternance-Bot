@@ -4,6 +4,9 @@ import { HorizontalBars, StatTile, WeeklyBars } from "@/components/charts";
 import { RefreshButton } from "@/components/RefreshButton";
 import { loadDashboard } from "@/lib/views";
 
+// Les actions de cette page appellent l'IA (recherche et notation, ou rédaction du dossier).
+export const maxDuration = 300;
+
 export default function DashboardPage() {
   return (
     <div className="space-y-6">

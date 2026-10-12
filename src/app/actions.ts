@@ -4,12 +4,20 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE, isValidSession, safeEqual, sessionToken } from "@/lib/auth";
-import { parseCv, toCvSummary, writeFollowUp, writeLetter } from "@/lib/claude";
+import { buildAttachments, prepareDossier, type DossierPart } from "@/lib/application";
+import { parseCv, parseTailoredCv, tailorCv, toCvSummary, writeFollowUp } from "@/lib/claude";
 import { addEvent, getCvPdf, getOffer, getProfile, saveProfile, updateOffer } from "@/lib/db";
 import { sendApplicationEmail } from "@/lib/mail";
 import { refreshOffers, type RefreshReport } from "@/lib/pipeline";
 import { changeStatus } from "@/lib/tracking";
-import { APPLIED_STATUSES, OFFER_STATUSES, type OfferStatus } from "@/lib/types";
+import {
+  APPLIED_STATUSES,
+  OFFER_STATUSES,
+  type DossierTexts,
+  type OfferRow,
+  type OfferStatus,
+  type TailoredCv,
+} from "@/lib/types";
 
 export type ActionResult<T = undefined> = { ok: true; data?: T; message?: string } | { ok: false; error: string };
 
@@ -65,38 +73,81 @@ export async function refreshAction(): Promise<ActionResult<RefreshReport>> {
   }
 }
 
-export async function generateLetterAction(id: string): Promise<ActionResult<{ subject: string; body: string }>> {
+export type DossierResult = Pick<
+  OfferRow,
+  "letter_subject" | "letter" | "cover_letter_title" | "cover_letter" | "short_message" | "tailored_cv"
+>;
+
+function dossierOf(offer: OfferRow): DossierResult {
+  const { letter_subject, letter, cover_letter_title, cover_letter, short_message, tailored_cv } = offer;
+  return { letter_subject, letter, cover_letter_title, cover_letter, short_message, tailored_cv };
+}
+
+/** L'IA rédige les textes (email, lettre, message court) et/ou adapte le CV à l'offre. */
+export async function prepareDossierAction(id: string, parts: DossierPart[]): Promise<ActionResult<DossierResult>> {
   await requireSession();
   try {
     const [profile, offer] = await Promise.all([getProfile(), getOffer(id)]);
     if (!offer) return { ok: false, error: "Offre introuvable." };
     if (!profile.cv_summary) return { ok: false, error: "Ajoute d'abord ton CV dans la page Profil." };
-    const letter = await writeLetter(profile, offer);
-    await updateOffer(id, {
-      letter_subject: letter.subject,
-      letter: letter.body,
-      status: offer.status === "new" ? "draft" : offer.status,
-    });
-    await addEvent({ offer_id: id, type: "letter_generated", status: null, summary: "Lettre rédigée par l'IA" });
+    const { patch, errors } = await prepareDossier(profile, offer, parts);
+    if (Object.keys(patch).length === 0) return { ok: false, error: errors.join(" · ") || "Rien n'a été généré." };
+    await updateOffer(id, { ...patch, status: offer.status === "new" ? "draft" : offer.status });
+    const done = [patch.letter && "lettre, email et message", patch.tailored_cv && "CV adapté"].filter(Boolean);
+    await addEvent({ offer_id: id, type: "letter_generated", status: null, summary: `Rédigé par l'IA : ${done.join(" et ")}` });
     revalidateOffer(id);
-    return { ok: true, data: letter };
+    const message = errors.length
+      ? `En partie prêt. Problème : ${errors.join(" · ")}`
+      : "Prêt : relis chaque partie et ajuste-la si besoin.";
+    return { ok: true, data: dossierOf({ ...offer, ...patch }), message };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }
 }
 
-export async function saveLetterAction(id: string, subject: string, body: string): Promise<ActionResult> {
+/** Retouche le CV adapté selon tes consignes (« mets plus en avant React », « retire le stage X »...). */
+export async function retouchCvAction(id: string, instructions: string): Promise<ActionResult<TailoredCv>> {
+  await requireSession();
+  try {
+    if (!instructions.trim()) return { ok: false, error: "Écris d'abord ce que tu veux changer." };
+    const [profile, offer, cvPdf] = await Promise.all([getProfile(), getOffer(id), getCvPdf()]);
+    if (!offer) return { ok: false, error: "Offre introuvable." };
+    if (!cvPdf) return { ok: false, error: "Ajoute d'abord ton CV dans la page Profil." };
+    const cv = await tailorCv(profile, offer, cvPdf.base64, { instructions, previous: offer.tailored_cv });
+    await updateOffer(id, { tailored_cv: cv });
+    await addEvent({ offer_id: id, type: "letter_generated", status: null, summary: "CV adapté retouché par l'IA" });
+    revalidateOffer(id);
+    return { ok: true, data: cv, message: "CV mis à jour." };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
+}
+
+/** Ne garde que les champs texte attendus, en chaînes. */
+function cleanTexts(texts: DossierTexts): DossierTexts {
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  return {
+    letter_subject: str(texts.letter_subject),
+    letter: str(texts.letter),
+    cover_letter_title: str(texts.cover_letter_title),
+    cover_letter: str(texts.cover_letter),
+    short_message: str(texts.short_message),
+  };
+}
+
+/** Enregistre tes retouches. `cv` : undefined = on n'y touche pas, null = on revient au CV d'origine. */
+export async function saveDossierAction(id: string, texts: DossierTexts, cv?: TailoredCv | null): Promise<ActionResult> {
   await requireSession();
   try {
     const offer = await getOffer(id);
     if (!offer) return { ok: false, error: "Offre introuvable." };
     await updateOffer(id, {
-      letter_subject: subject,
-      letter: body,
+      ...cleanTexts(texts),
+      ...(cv === undefined ? {} : { tailored_cv: cv === null ? null : parseTailoredCv(cv) }),
       status: offer.status === "new" ? "draft" : offer.status,
     });
     revalidateOffer(id);
-    return { ok: true, message: "Lettre enregistrée." };
+    return { ok: true, message: "Enregistré." };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }
@@ -106,25 +157,41 @@ export async function saveLetterAction(id: string, subject: string, body: string
 export async function sendApplicationAction(
   id: string,
   to: string,
-  subject: string,
-  body: string,
+  texts: DossierTexts,
+  cv: TailoredCv | null | undefined,
+  options: { tailoredCv: boolean; coverLetter: boolean },
 ): Promise<ActionResult> {
   await requireSession();
   try {
-    if (!to.includes("@")) return { ok: false, error: "Adresse email du recruteur invalide." };
-    if (!subject.trim() || !body.trim()) return { ok: false, error: "L'objet et le message sont obligatoires." };
-    const [profile, cv, offer] = await Promise.all([getProfile(), getCvPdf(), getOffer(id)]);
+    texts = cleanTexts(texts);
+    to = to.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return { ok: false, error: "Adresse email du recruteur invalide." };
+    if (!texts.letter_subject.trim() || !texts.letter.trim()) {
+      return { ok: false, error: "L'objet et le message de l'email sont obligatoires." };
+    }
+    const [profile, offer] = await Promise.all([getProfile(), getOffer(id)]);
     if (!offer) return { ok: false, error: "Offre introuvable." };
+    // Ce qui part est exactement ce que tu as sous les yeux : on enregistre d'abord tes dernières retouches.
+    const edits: Partial<OfferRow> = { ...texts, apply_email: to };
+    if (cv !== undefined) edits.tailored_cv = cv === null ? null : parseTailoredCv(cv);
+    await updateOffer(id, edits);
+    const current = { ...offer, ...edits };
+    const attachments = await buildAttachments(profile, current, options);
     await sendApplicationEmail({
       fromName: profile.full_name,
       replyTo: profile.email,
       to,
-      subject,
-      body,
-      attachment: cv,
+      subject: texts.letter_subject,
+      body: texts.letter,
+      attachments,
     });
-    await updateOffer(id, { apply_email: to, letter_subject: subject, letter: body });
-    await addEvent({ offer_id: id, type: "email_sent", status: null, summary: `Candidature envoyée par email à ${to}` });
+    const joined = attachments.map((a) => a.filename).join(", ");
+    await addEvent({
+      offer_id: id,
+      type: "email_sent",
+      status: null,
+      summary: `Candidature envoyée par email à ${to}${joined ? ` (pièces jointes : ${joined})` : ""}`,
+    });
     if (!APPLIED_STATUSES.includes(offer.status)) await changeStatus(offer, "sent");
     revalidateOffer(id);
     return { ok: true, message: `Candidature envoyée à ${to}.` };
@@ -182,7 +249,7 @@ export async function sendFollowUpAction(id: string, subject: string, body: stri
       to: offer.apply_email,
       subject,
       body,
-      attachment: null,
+      attachments: [],
     });
     await addEvent({ offer_id: id, type: "followup_sent", status: null, summary: `Relance envoyée à ${offer.apply_email}` });
     if (offer.status === "sent") await changeStatus(offer, "followed_up");
@@ -254,6 +321,7 @@ export async function saveProfileAction(_prev: ActionResult, formData: FormData)
         school: text("school"),
         auto_letters: Math.max(0, Math.min(20, Math.round(num("auto_letters", current.search.auto_letters)))),
         auto_letter_min_score: Math.max(0, Math.min(100, Math.round(num("auto_letter_min_score", current.search.auto_letter_min_score)))),
+        auto_tailor_cv: formData.get("auto_tailor_cv") === "on",
         follow_up_days: Math.max(1, Math.round(num("follow_up_days", current.search.follow_up_days))),
       },
     });
