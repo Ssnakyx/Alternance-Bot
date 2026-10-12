@@ -38,7 +38,7 @@ export async function scorePendingOffers(profile: Profile, errors: string[]): Pr
     }
     await Promise.all(
       outcome.value.map((r) =>
-        updateOffer(r.id, { score: r.score, strengths: r.strengths, gaps: r.gaps, scored_at: now }),
+        updateOffer(r.id, { score: r.score, ai_work: r.ai_work, strengths: r.strengths, gaps: r.gaps, scored_at: now }),
       ),
     );
     scored += outcome.value.length;

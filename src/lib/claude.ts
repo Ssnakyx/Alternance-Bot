@@ -110,6 +110,7 @@ const ScoresSchema = z.object({
     z.object({
       id: z.string(),
       score: z.number().int().min(0).max(100),
+      ai_work: z.boolean(),
       strengths: z.array(z.string()),
       gaps: z.array(z.string()),
     }),
@@ -126,6 +127,8 @@ function candidateBrief(profile: Profile): string {
   return JSON.stringify(
     {
       cv: profile.cv_summary,
+      // Déclaré par le candidat lui-même : c'est vrai, même si le CV n'en parle pas.
+      competences_en_plus_du_cv: s.extra_skills || "aucune",
       recherche: {
         poste: `alternance ${s.keywords}`,
         ville: `${s.city} (rayon ${s.radius_km} km)`,
@@ -133,6 +136,9 @@ function candidateBrief(profile: Profile): string {
         rythme: s.rhythm || "non précisé",
         date_de_debut: s.start_date || "non précisée",
         ecole: s.school || "non précisée",
+        priorite: s.ai_focus
+          ? "postes où l'on travaille avec l'IA (intégration de LLM et d'API d'IA, agents, automatisation, IA générative)"
+          : "aucune en particulier",
       },
     },
     null,
@@ -160,6 +166,14 @@ export async function scoreOffers(profile: Profile, offers: OfferRow[]): Promise
       "de compatibilité de 0 à 100 avec son profil, en tenant compte : des compétences demandées " +
       "par rapport à son CV, du niveau attendu (c'est un alternant, pas un senior), du lieu " +
       "(dans sa zone ou en télétravail) et du type de poste (développement fullstack/web en priorité). " +
+      "Les compétences de `competences_en_plus_du_cv` comptent comme celles du CV. " +
+      "`ai_work` : vrai si le poste implique de travailler avec l'IA (intégrer des LLM ou des API d'IA " +
+      "dans un produit, construire des agents ou des automatisations à base d'IA, IA générative), faux " +
+      "si l'IA n'est qu'un mot à la mode dans la description ou si l'entreprise n'en parle pas. " +
+      (profile.search.ai_focus
+        ? "Le candidat veut en priorité ces postes avec de l'IA : à compatibilité égale, donne-leur " +
+          "10 à 15 points de plus. "
+        : "") +
       "`strengths` : 1 à 3 points forts courts. `gaps` : 0 à 3 manques courts. Français, phrases de " +
       "quelques mots. Renvoie un résultat par offre, avec exactement le même `id`.",
     content: `Profil du candidat :\n${candidateBrief(profile)}\n\nOffres à évaluer :\n${JSON.stringify(payload, null, 2)}`,
@@ -221,7 +235,8 @@ export async function writeApplication(profile: Profile, offer: OfferRow): Promi
       "paragraphes séparés par une ligne vide : ce qui attire le candidat chez cette entreprise et dans " +
       "ce poste, ce qu'il apporte en reliant 2 ou 3 éléments précis du profil aux besoins de l'offre, " +
       "les modalités de l'alternance (rythme, date de début, école s'ils sont connus), puis la demande " +
-      "d'entretien.\n" +
+      "d'entretien. Si le poste implique de travailler avec l'IA et que le candidat a des compétences " +
+      "en IA (CV ou `competences_en_plus_du_cv`), mets-les en avant.\n" +
       "- `email_subject` : objet court de l'email qui cite le poste et l'alternance.\n" +
       "- `email_body` : l'email d'accompagnement, 80 à 140 mots, de « Bonjour » à la signature. Il " +
       "présente la candidature en deux ou trois phrases avec un élément précis du profil, et indique que " +
@@ -290,7 +305,9 @@ export async function tailorCv(
       "peux reformuler, réordonner, regrouper, mettre en avant ce qui correspond à l'offre, reprendre le " +
       "vocabulaire de l'offre quand il désigne une chose réellement présente dans le CV, et raccourcir " +
       "ou retirer ce qui n'aide pas pour ce poste. Tout ce que l'offre demande et que le CV ne montre " +
-      "pas va dans `not_added`, jamais dans le CV. Le CV doit tenir sur une page. Français.",
+      "pas va dans `not_added`, jamais dans le CV. Seule exception : les compétences que le candidat " +
+      "déclare lui-même en plus de son CV, qui sont vraies et peuvent apparaître dans le CV adapté. Le " +
+      "CV doit tenir sur une page. Français.",
     content: [
       {
         type: "document",
@@ -303,7 +320,8 @@ export async function tailorCv(
         text:
           `Voici le CV d'origine du candidat (document ci-dessus).\n\n${offerBrief(offer)}\n\n` +
           `Recherche : alternance ${s.keywords}, rythme ${s.rhythm || "non précisé"}, début ` +
-          `${s.start_date || "non précisé"}, école ${s.school || "non précisée"}.\n\n` +
+          `${s.start_date || "non précisé"}, école ${s.school || "non précisée"}.\n` +
+          `Compétences déclarées par le candidat en plus de son CV : ${s.extra_skills || "aucune"}.\n\n` +
           "Rédige le CV adapté :\n" +
           "- `headline` : le titre visé, par exemple « Développeur fullstack en alternance », suivi du " +
           "rythme s'il est connu.\n" +
@@ -517,9 +535,14 @@ export async function searchWebOffers(prefs: SearchPrefs): Promise<WebOffer[]> {
       "Cherche sur les sites d'emploi : Welcome to the Jungle, HelloWork, LinkedIn, Indeed, JobTeaser, " +
       "APEC, Meteojob, et les pages carrières d'entreprises. Fais plusieurs recherches différentes " +
       "(par site, par intitulé : développeur fullstack, développeur web, React, Node.js...).\n" +
+      (prefs.ai_focus
+        ? "Le candidat veut en priorité un poste où l'on travaille avec l'IA : consacre environ la moitié " +
+          "de tes recherches à ces postes (développeur IA, intégration d'IA ou de LLM, IA générative, " +
+          "agents IA, automatisation avec l'IA, développeur fullstack IA) et mets-les en tête de liste.\n"
+        : "") +
       "Renvoie jusqu'à 20 offres avec report_offers.",
     report: REPORT_OFFERS,
-    maxSearches: 8,
+    maxSearches: prefs.ai_focus ? 10 : 8,
     maxFetches: 4,
     maxTokens: 12000,
     budgetMs: 200_000,

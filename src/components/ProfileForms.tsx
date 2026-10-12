@@ -80,9 +80,32 @@ export function ProfileForm({ profile }: { profile: Profile }) {
           <Field label="Rythme" name="rhythm" defaultValue={s.rhythm} placeholder="3 semaines entreprise / 1 semaine école" />
           <Field label="Date de début" name="start_date" defaultValue={s.start_date} placeholder="septembre 2027" />
         </div>
+        <label className="block space-y-1 text-sm">
+          <span className="text-slate-600">Ce que tu sais faire en plus de ton CV</span>
+          <textarea
+            name="extra_skills"
+            rows={2}
+            defaultValue={s.extra_skills}
+            placeholder="Très à l'aise avec Claude et Claude Code, intégration d'API d'IA..."
+            className="w-full rounded-lg border border-slate-300 px-3 py-2"
+          />
+          <span className="block text-xs text-slate-500">
+            L&apos;IA s&apos;en sert comme de ton CV pour noter les offres, écrire tes lettres et adapter ton CV.
+          </span>
+        </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" name="include_remote" defaultChecked={s.include_remote} />
           Inclure les alternances en télétravail partout en France
+        </label>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" name="ai_focus" defaultChecked={s.ai_focus} className="mt-1" />
+          <span>
+            Priorité aux postes où l&apos;on travaille avec l&apos;IA
+            <span className="block text-xs text-slate-500">
+              Intégration de LLM, agents, automatisation, IA générative : recherchés en plus, notés plus haut et
+              marqués « IA ».
+            </span>
+          </span>
         </label>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" name="web_search" defaultChecked={s.web_search} className="mt-1" />

@@ -12,6 +12,7 @@ export function ScoreBadge({ score }: { score: number | null }) {
 export function OfferBadges({ offer }: { offer: OfferRow }) {
   return (
     <div className="flex flex-wrap gap-1.5 text-xs">
+      {offer.ai_work && <span className="rounded bg-fuchsia-100 px-2 py-0.5 text-fuchsia-800">IA</span>}
       {offer.remote && <span className="rounded bg-sky-100 px-2 py-0.5 text-sky-800">Télétravail</span>}
       {offer.kind === "spontaneous" && (
         <span className="rounded bg-violet-100 px-2 py-0.5 text-violet-800">Candidature spontanée</span>

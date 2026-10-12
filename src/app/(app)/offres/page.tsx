@@ -38,16 +38,19 @@ async function OfferList({ searchParams }: { searchParams: PageProps<"/offres">[
   const params = await searchParams;
   const tab: TabKey = typeof params.tab === "string" && params.tab in TABS ? (params.tab as TabKey) : "todo";
   const remoteOnly = params.remote === "1";
+  const aiOnly = params.ai === "1";
   const spontaneous = params.kind === "spontaneous";
 
   const [counts, rows] = await Promise.all([countByStatus(), listOffers(TABS[tab].statuses)]);
   let offers = rows;
   if (remoteOnly) offers = offers.filter((o) => o.remote);
+  if (aiOnly) offers = offers.filter((o) => o.ai_work);
   offers = offers.filter((o) => (spontaneous ? o.kind === "spontaneous" : o.kind === "offer"));
 
-  const href = (patch: { tab?: TabKey; remote?: boolean; spontaneous?: boolean }) => {
+  const href = (patch: { tab?: TabKey; remote?: boolean; ai?: boolean; spontaneous?: boolean }) => {
     const q = new URLSearchParams({ tab: patch.tab ?? tab });
     if (patch.remote ?? remoteOnly) q.set("remote", "1");
+    if (patch.ai ?? aiOnly) q.set("ai", "1");
     if (patch.spontaneous ?? spontaneous) q.set("kind", "spontaneous");
     return `/offres?${q}`;
   };
@@ -66,6 +69,9 @@ async function OfferList({ searchParams }: { searchParams: PageProps<"/offres">[
         <div className="ml-auto flex gap-2">
           <Link href={href({ spontaneous: !spontaneous })} className={pill(spontaneous, "bg-violet-600")}>
             Candidatures spontanées
+          </Link>
+          <Link href={href({ ai: !aiOnly })} className={pill(aiOnly, "bg-fuchsia-600")}>
+            IA
           </Link>
           <Link href={href({ remote: !remoteOnly })} className={pill(remoteOnly, "bg-sky-600")}>
             Télétravail

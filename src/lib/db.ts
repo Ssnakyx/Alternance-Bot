@@ -82,7 +82,8 @@ export async function getUnscoredOffers(limit: number): Promise<OfferRow[]> {
     await db()
       .from("offers")
       .select("*")
-      .is("score", null)
+      // Les offres notées avant l'option IA sont renotées une fois pour savoir si le poste en implique.
+      .or("score.is.null,ai_work.is.null")
       .eq("status", "new")
       .order("published_at", { ascending: false, nullsFirst: false })
       .limit(limit),
