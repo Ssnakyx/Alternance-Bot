@@ -514,38 +514,48 @@ const REPORT_OFFERS: Anthropic.Tool = {
   },
 };
 
+/** Un angle de recherche : les sites à fouiller et le type de poste à viser. */
+export interface WebSearchAngle {
+  sites: string;
+  focus: string;
+}
+
 /**
  * Cherche via un moteur de recherche les offres d'alternance publiées sur les sites d'emploi qui
  * n'ont pas d'API publique (LinkedIn, Indeed, Welcome to the Jungle, HelloWork...). L'IA ne
- * renvoie que des offres dont elle a vu la page dans les résultats, avec leur lien.
+ * renvoie que des offres dont elle a vu la page dans les résultats, avec leur lien. `known` liste
+ * les offres déjà trouvées les jours précédents, pour qu'elle en cherche de nouvelles.
  */
-export async function searchWebOffers(prefs: SearchPrefs): Promise<WebOffer[]> {
+export async function searchWebOffers(prefs: SearchPrefs, angle: WebSearchAngle, known: string[]): Promise<WebOffer[]> {
   const where = prefs.include_remote
-    ? `à ${prefs.city} (rayon ${prefs.radius_km} km) ou en télétravail depuis la France`
-    : `à ${prefs.city} (rayon ${prefs.radius_km} km)`;
+    ? `à ${prefs.city} et dans sa région (rayon ${prefs.radius_km} km), ou en télétravail depuis la France`
+    : `à ${prefs.city} et dans sa région (rayon ${prefs.radius_km} km)`;
   const input = (await searchThenReport({
     system:
       "Tu cherches des offres d'alternance pour un étudiant. Tu ne renvoies que des offres réelles dont tu " +
       "as vu la page dans les résultats de recherche ou en la lisant, avec leur lien direct. Tu n'inventes " +
-      "jamais d'offre, d'entreprise ni de lien. Tu écartes les CDI, CDD, stages, offres expirées et offres " +
-      "pour profils seniors.",
+      "jamais d'offre, d'entreprise ni de lien. Tu écartes les CDI, CDD, stages, offres expirées, offres " +
+      "pour profils seniors, et les annonces d'écoles ou de centres de formation qui recrutent des élèves " +
+      "pour leur cursus (sauf si l'annonce nomme l'entreprise qui embauche).",
     prompt:
       `Trouve des offres d'alternance (contrat d'apprentissage ou de professionnalisation) de ` +
-      `${prefs.keywords || "développeur"} fullstack ou web, ${where}, publiées ces dernières semaines.\n` +
-      "Cherche sur les sites d'emploi : Welcome to the Jungle, HelloWork, LinkedIn, Indeed, JobTeaser, " +
-      "APEC, Meteojob, et les pages carrières d'entreprises. Fais plusieurs recherches différentes " +
-      "(par site, par intitulé : développeur fullstack, développeur web, React, Node.js...).\n" +
-      (prefs.ai_focus
-        ? "Le candidat veut en priorité un poste où l'on travaille avec l'IA : consacre environ la moitié " +
-          "de tes recherches à ces postes (développeur IA, intégration d'IA ou de LLM, IA générative, " +
-          "agents IA, automatisation avec l'IA, développeur fullstack IA) et mets-les en tête de liste.\n"
+      `${prefs.keywords || "développeur"}, ${where}, publiées ces dernières semaines.\n` +
+      `Postes visés : ${angle.focus}\n` +
+      `Sites à fouiller : ${angle.sites}\n` +
+      "Fais beaucoup de recherches différentes : par site, par intitulé, par ville voisine (Villeurbanne, " +
+      "Vénissieux, Écully, Limonest, Saint-Priest, Bron...) et par technologie. Les pages de résultats des " +
+      "sites d'emploi listent souvent plusieurs offres : lis-en quelques-unes pour récupérer chaque offre " +
+      "avec son lien direct.\n" +
+      (known.length
+        ? `Ces offres sont déjà connues, ne les renvoie pas :\n${known.map((k) => `- ${k}`).join("\n")}\n`
         : "") +
-      "Renvoie jusqu'à 20 offres avec report_offers.",
+      "Renvoie jusqu'à 25 nouvelles offres avec report_offers.",
     report: REPORT_OFFERS,
-    maxSearches: prefs.ai_focus ? 10 : 8,
-    maxFetches: 4,
-    maxTokens: 12000,
-    budgetMs: 200_000,
+    maxSearches: 12,
+    maxFetches: 6,
+    maxTokens: 16000,
+    // Les recherches tournent en parallèle, puis vient la notation : le tout doit tenir dans 300 s.
+    budgetMs: 170_000,
   })) as { offers?: WebOffer[] } | null;
   return (input?.offers ?? []).filter((o) => /^https?:\/\//.test(o.url) && o.title.trim());
 }
