@@ -30,8 +30,8 @@ suit ensuite tes candidatures jusqu'à la réponse.
 - **Suivi** : tableau Lettre prête → Envoyée → Relancée → Entretien → Acceptée / Refusée.
 - **Automatique, chaque matin** (Vercel Cron, en deux temps pour tenir dans les 5 minutes
   qu'accorde Vercel à chaque appel) :
-  1. vers 5 h UTC, récupération des nouvelles offres (La Bonne Alternance, France Travail, Adzuna
-     et la recherche web), notation par l'IA et lecture de ta boîte Gmail. Quand une entreprise
+  1. vers 5 h UTC, récupération des nouvelles offres (La Bonne Alternance, France Travail et la
+     recherche web), notation par l'IA et lecture de ta boîte Gmail. Quand une entreprise
      répond, l'IA lit l'email et passe la candidature en « Entretien », « Acceptée » ou
      « Refusée » toute seule ;
   2. vers 7 h UTC, dossiers préparés pour les meilleures offres : lettre, CV adapté (réglable dans
@@ -52,7 +52,6 @@ Gmail (envoi SMTP et lecture IMAP) · Vercel.
 | Anthropic | IA (notes, lettres, lecture des réponses) | [console.anthropic.com](https://console.anthropic.com) > API Keys |
 | La Bonne Alternance | Offres d'alternance et entreprises qui recrutent | [api.apprentissage.beta.gouv.fr](https://api.apprentissage.beta.gouv.fr) |
 | France Travail | Offres en contrat d'apprentissage ou de professionnalisation | [francetravail.io](https://francetravail.io), API « Offres d'emploi v2 » |
-| Adzuna | Agrégateur (Indeed, sites carrières...) | [developer.adzuna.com](https://developer.adzuna.com) |
 | Gmail | Envoyer les candidatures et lire les réponses | [Mot de passe d'application](https://myaccount.google.com/apppasswords) |
 
 Les sources d'offres sont facultatives : celles qui n'ont pas de clé sont simplement ignorées.
