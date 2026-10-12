@@ -5,7 +5,20 @@ import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages
 import { z } from "zod";
 import type { CvSummary, OfferRow, Profile } from "./types";
 
-const MODEL = "claude-opus-5-5";
+/**
+ * Deux modèles selon la tâche, pour garder un coût minime :
+ * - "fast" (Haiku) pour le volume : lecture du CV, notes des offres, lecture des réponses ;
+ * - "writing" (Opus) pour ce que lit le recruteur : lettres et relances.
+ * Modifiables sans toucher au code via CLAUDE_MODEL_FAST / CLAUDE_MODEL_WRITING.
+ */
+const MODELS = {
+  fast: process.env.CLAUDE_MODEL_FAST || "claude-haiku-5-5",
+  writing: process.env.CLAUDE_MODEL_WRITING || "claude-opus-5-5",
+};
+type Tier = keyof typeof MODELS;
+
+/** Modèles qui acceptent la relance automatique sur un autre modèle en cas de refus. */
+const SUPPORTS_FALLBACKS = new Set(["claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"]);
 
 let client: Anthropic | null = null;
 function anthropic(): Anthropic {
@@ -18,21 +31,25 @@ type Effort = "low" | "medium" | "high";
 
 /**
  * Appel structuré : la réponse est validée contre le schéma Zod.
- * `fallbacks: "default"` relance automatiquement la requête sur un autre modèle
- * si celui-ci la refuse (rare sur ce type de contenu).
+ * Quand le modèle le permet, `fallbacks: "default"` relance automatiquement la
+ * requête sur un autre modèle si celui-ci la refuse (rare sur ce type de contenu).
  */
 async function structured<S extends z.ZodType>(opts: {
+  tier: Tier;
   schema: S;
   system: string;
   content: BetaMessageParam["content"];
   effort: Effort;
   maxTokens?: number;
 }): Promise<z.infer<S>> {
+  const model = MODELS[opts.tier];
+  const fallback = SUPPORTS_FALLBACKS.has(model)
+    ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
+    : {};
   const response = await anthropic().beta.messages.parse({
-    model: MODEL,
+    model,
     max_tokens: opts.maxTokens ?? 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...fallback,
     system: opts.system,
     messages: [{ role: "user", content: opts.content }],
     output_config: { effort: opts.effort, format: betaZodOutputFormat(opts.schema) },
@@ -67,6 +84,7 @@ export type ParsedCv = z.infer<typeof CvSchema>;
 
 export async function parseCv(pdfBase64: string): Promise<ParsedCv> {
   return structured({
+    tier: "fast",
     schema: CvSchema,
     effort: "low",
     system:
@@ -133,6 +151,7 @@ export async function scoreOffers(profile: Profile, offers: OfferRow[]): Promise
   }));
 
   const { results } = await structured({
+    tier: "fast",
     schema: ScoresSchema,
     effort: "low",
     system:
@@ -157,6 +176,7 @@ export async function writeLetter(
   offer: OfferRow,
 ): Promise<{ subject: string; body: string }> {
   return structured({
+    tier: "writing",
     schema: LetterSchema,
     effort: "medium",
     system:
@@ -200,6 +220,7 @@ export async function writeFollowUp(
   offer: OfferRow,
 ): Promise<{ subject: string; body: string }> {
   return structured({
+    tier: "writing",
     schema: LetterSchema,
     effort: "low",
     system:
@@ -230,6 +251,7 @@ export async function classifyReply(
   email: { from: string; subject: string; text: string },
 ): Promise<ReplyClassification> {
   return structured({
+    tier: "fast",
     schema: ReplySchema,
     effort: "low",
     system:
