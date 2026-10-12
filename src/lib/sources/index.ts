@@ -1,6 +1,5 @@
 import { describeError } from "../errors";
 import { SOURCE_LABELS, type NormalizedOffer, type OfferSource, type SearchPrefs } from "../types";
-import { fetchAdzuna } from "./adzuna";
 import { fetchFranceTravail } from "./francetravail";
 import { fetchLba } from "./lba";
 import { fetchWeb } from "./web";
@@ -8,7 +7,6 @@ import { fetchWeb } from "./web";
 const SOURCES: Record<OfferSource, (prefs: SearchPrefs) => Promise<NormalizedOffer[]>> = {
   lba: fetchLba,
   francetravail: fetchFranceTravail,
-  adzuna: fetchAdzuna,
   web: fetchWeb,
 };
 

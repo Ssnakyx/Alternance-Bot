@@ -1,4 +1,4 @@
-export type OfferSource = "lba" | "francetravail" | "adzuna" | "web";
+export type OfferSource = "lba" | "francetravail" | "web";
 
 /** "offer" = offre publiée, "spontaneous" = entreprise qui recrute souvent des alternants sans offre publiée. */
 export type OfferKind = "offer" | "spontaneous";
@@ -45,7 +45,6 @@ export interface OfferEvent {
 export const SOURCE_LABELS: Record<OfferSource, string> = {
   lba: "La Bonne Alternance",
   francetravail: "France Travail",
-  adzuna: "Adzuna",
   web: "Recherche web",
 };
 
