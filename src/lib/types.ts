@@ -1,4 +1,4 @@
-export type OfferSource = "lba" | "francetravail" | "adzuna";
+export type OfferSource = "lba" | "francetravail" | "adzuna" | "web";
 
 /** "offer" = offre publiée, "spontaneous" = entreprise qui recrute souvent des alternants sans offre publiée. */
 export type OfferKind = "offer" | "spontaneous";
@@ -46,6 +46,7 @@ export const SOURCE_LABELS: Record<OfferSource, string> = {
   lba: "La Bonne Alternance",
   francetravail: "France Travail",
   adzuna: "Adzuna",
+  web: "Recherche web",
 };
 
 /** Offre normalisée, quelle que soit la source. */
@@ -64,6 +65,10 @@ export interface NormalizedOffer {
 }
 
 export interface OfferRow extends NormalizedOffer {
+  /** Page où l'IA a trouvé l'email de recrutement (vide si l'email vient de l'offre). */
+  apply_email_source: string | null;
+  /** Date de la dernière recherche d'email par l'IA, trouvée ou non. */
+  email_searched_at: string | null;
   score: number | null;
   strengths: string[];
   gaps: string[];
@@ -92,6 +97,8 @@ export interface SearchPrefs {
   radius_km: number;
   departement: string;
   include_remote: boolean;
+  /** Cherche aussi les offres publiées sur LinkedIn, Indeed, Welcome to the Jungle, HelloWork... via une recherche web. */
+  web_search: boolean;
   keywords: string;
   romes: string[];
   rhythm: string;
@@ -114,6 +121,7 @@ export const DEFAULT_SEARCH: SearchPrefs = {
   radius_km: 30,
   departement: "69",
   include_remote: true,
+  web_search: true,
   keywords: "développeur",
   romes: ["M1805"],
   rhythm: "",

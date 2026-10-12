@@ -4,11 +4,12 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE, isValidSession, safeEqual, sessionToken } from "@/lib/auth";
-import { buildAttachments, prepareDossier, type DossierPart } from "@/lib/application";
-import { parseCv, parseTailoredCv, tailorCv, toCvSummary, writeFollowUp } from "@/lib/claude";
+import { buildAttachments, contactPatch, prepareDossier, type DossierPart } from "@/lib/application";
+import { findRecruiterEmail, parseCv, parseTailoredCv, tailorCv, toCvSummary, writeFollowUp } from "@/lib/claude";
 import { addEvent, getCvPdf, getOffer, getProfile, saveProfile, updateOffer } from "@/lib/db";
+import { describeError } from "@/lib/errors";
 import { sendApplicationEmail } from "@/lib/mail";
-import { refreshOffers, type RefreshReport } from "@/lib/pipeline";
+import { prepareTopDossiers, refreshOffers, type PrepareReport, type RefreshReport } from "@/lib/pipeline";
 import { changeStatus } from "@/lib/tracking";
 import {
   APPLIED_STATUSES,
@@ -20,10 +21,6 @@ import {
 } from "@/lib/types";
 
 export type ActionResult<T = undefined> = { ok: true; data?: T; message?: string } | { ok: false; error: string };
-
-function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
 
 function revalidateOffer(id: string) {
   revalidatePath("/", "layout");
@@ -69,18 +66,38 @@ export async function refreshAction(): Promise<ActionResult<RefreshReport>> {
     revalidatePath("/", "layout");
     return { ok: true, data: report };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
+  }
+}
+
+/** Deuxième temps du bouton « Chercher » : les dossiers des meilleures offres. */
+export async function prepareDossiersAction(): Promise<ActionResult<PrepareReport>> {
+  await requireSession();
+  try {
+    const report = await prepareTopDossiers();
+    revalidatePath("/", "layout");
+    return { ok: true, data: report };
+  } catch (e) {
+    return { ok: false, error: describeError(e) };
   }
 }
 
 export type DossierResult = Pick<
   OfferRow,
-  "letter_subject" | "letter" | "cover_letter_title" | "cover_letter" | "short_message" | "tailored_cv"
+  | "letter_subject"
+  | "letter"
+  | "cover_letter_title"
+  | "cover_letter"
+  | "short_message"
+  | "tailored_cv"
+  | "apply_email"
+  | "apply_email_source"
 >;
 
 function dossierOf(offer: OfferRow): DossierResult {
   const { letter_subject, letter, cover_letter_title, cover_letter, short_message, tailored_cv } = offer;
-  return { letter_subject, letter, cover_letter_title, cover_letter, short_message, tailored_cv };
+  const { apply_email, apply_email_source } = offer;
+  return { letter_subject, letter, cover_letter_title, cover_letter, short_message, tailored_cv, apply_email, apply_email_source };
 }
 
 /** L'IA rédige les textes (email, lettre, message court) et/ou adapte le CV à l'offre. */
@@ -93,7 +110,11 @@ export async function prepareDossierAction(id: string, parts: DossierPart[]): Pr
     const { patch, errors } = await prepareDossier(profile, offer, parts);
     if (Object.keys(patch).length === 0) return { ok: false, error: errors.join(" · ") || "Rien n'a été généré." };
     await updateOffer(id, { ...patch, status: offer.status === "new" ? "draft" : offer.status });
-    const done = [patch.letter && "lettre, email et message", patch.tailored_cv && "CV adapté"].filter(Boolean);
+    const done = [
+      patch.letter && "lettre, email et message",
+      patch.tailored_cv && "CV adapté",
+      patch.apply_email && `adresse ${patch.apply_email}`,
+    ].filter(Boolean);
     await addEvent({ offer_id: id, type: "letter_generated", status: null, summary: `Rédigé par l'IA : ${done.join(" et ")}` });
     revalidateOffer(id);
     const message = errors.length
@@ -101,7 +122,36 @@ export async function prepareDossierAction(id: string, parts: DossierPart[]): Pr
       : "Prêt : relis chaque partie et ajuste-la si besoin.";
     return { ok: true, data: dossierOf({ ...offer, ...patch }), message };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
+  }
+}
+
+/** L'IA cherche sur le web l'adresse où envoyer la candidature (offre, RH ou contact de l'entreprise). */
+export async function findEmailAction(
+  id: string,
+): Promise<ActionResult<{ email: string | null; source: string; note: string }>> {
+  await requireSession();
+  try {
+    const offer = await getOffer(id);
+    if (!offer) return { ok: false, error: "Offre introuvable." };
+    const contact = await findRecruiterEmail(offer);
+    await updateOffer(id, contactPatch(contact));
+    if (contact.email) {
+      await addEvent({
+        offer_id: id,
+        type: "letter_generated",
+        status: null,
+        summary: `Adresse trouvée par l'IA : ${contact.email}`,
+      });
+    }
+    revalidateOffer(id);
+    return {
+      ok: true,
+      data: { email: contact.email, source: contact.source_url, note: contact.note },
+      message: contact.email ? `Adresse trouvée : ${contact.email}. Vérifie la source avant d'envoyer.` : undefined,
+    };
+  } catch (e) {
+    return { ok: false, error: describeError(e) };
   }
 }
 
@@ -119,7 +169,7 @@ export async function retouchCvAction(id: string, instructions: string): Promise
     revalidateOffer(id);
     return { ok: true, data: cv, message: "CV mis à jour." };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
   }
 }
 
@@ -149,7 +199,7 @@ export async function saveDossierAction(id: string, texts: DossierTexts, cv?: Ta
     revalidateOffer(id);
     return { ok: true, message: "Enregistré." };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
   }
 }
 
@@ -173,6 +223,8 @@ export async function sendApplicationAction(
     if (!offer) return { ok: false, error: "Offre introuvable." };
     // Ce qui part est exactement ce que tu as sous les yeux : on enregistre d'abord tes dernières retouches.
     const edits: Partial<OfferRow> = { ...texts, apply_email: to };
+    // Adresse modifiée à la main : la source trouvée par l'IA ne la concerne plus.
+    if (to !== offer.apply_email) edits.apply_email_source = null;
     if (cv !== undefined) edits.tailored_cv = cv === null ? null : parseTailoredCv(cv);
     await updateOffer(id, edits);
     const current = { ...offer, ...edits };
@@ -196,7 +248,7 @@ export async function sendApplicationAction(
     revalidateOffer(id);
     return { ok: true, message: `Candidature envoyée à ${to}.` };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
   }
 }
 
@@ -210,7 +262,7 @@ export async function setStatusAction(id: string, status: OfferStatus): Promise<
     revalidateOffer(id);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
   }
 }
 
@@ -220,7 +272,7 @@ export async function saveNotesAction(id: string, notes: string): Promise<Action
     await updateOffer(id, { notes });
     return { ok: true, message: "Notes enregistrées." };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
   }
 }
 
@@ -233,7 +285,7 @@ export async function generateFollowUpAction(id: string): Promise<ActionResult<{
     if (!offer) return { ok: false, error: "Offre introuvable." };
     return { ok: true, data: await writeFollowUp(profile, offer) };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
   }
 }
 
@@ -256,7 +308,7 @@ export async function sendFollowUpAction(id: string, subject: string, body: stri
     revalidateOffer(id);
     return { ok: true, message: "Relance envoyée." };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
   }
 }
 
@@ -286,7 +338,7 @@ export async function uploadCvAction(_prev: ActionResult, formData: FormData): P
     revalidatePath("/profil");
     return { ok: true, message: `CV analysé : ${cv.skills.length} compétences repérées.` };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
   }
 }
 
@@ -311,6 +363,7 @@ export async function saveProfileAction(_prev: ActionResult, formData: FormData)
         radius_km: num("radius_km", current.search.radius_km),
         departement: text("departement") || current.search.departement,
         include_remote: formData.get("include_remote") === "on",
+        web_search: formData.get("web_search") === "on",
         keywords: text("keywords") || current.search.keywords,
         romes: text("romes")
           .split(/[\s,;]+/)
@@ -328,6 +381,6 @@ export async function saveProfileAction(_prev: ActionResult, formData: FormData)
     revalidatePath("/profil");
     return { ok: true, message: "Profil enregistré." };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: describeError(e) };
   }
 }

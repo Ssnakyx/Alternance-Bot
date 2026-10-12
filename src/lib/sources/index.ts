@@ -1,12 +1,15 @@
-import type { NormalizedOffer, OfferSource, SearchPrefs } from "../types";
+import { describeError } from "../errors";
+import { SOURCE_LABELS, type NormalizedOffer, type OfferSource, type SearchPrefs } from "../types";
 import { fetchAdzuna } from "./adzuna";
 import { fetchFranceTravail } from "./francetravail";
 import { fetchLba } from "./lba";
+import { fetchWeb } from "./web";
 
 const SOURCES: Record<OfferSource, (prefs: SearchPrefs) => Promise<NormalizedOffer[]>> = {
   lba: fetchLba,
   francetravail: fetchFranceTravail,
   adzuna: fetchAdzuna,
+  web: fetchWeb,
 };
 
 export interface FetchResult {
@@ -41,7 +44,7 @@ export async function fetchAllOffers(prefs: SearchPrefs): Promise<FetchResult> {
   settled.forEach((outcome, i) => {
     const source = entries[i][0];
     if (outcome.status === "rejected") {
-      result.errors.push(`${source} : ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`);
+      result.errors.push(`${SOURCE_LABELS[source]} : ${describeError(outcome.reason)}`);
       return;
     }
     let kept = 0;

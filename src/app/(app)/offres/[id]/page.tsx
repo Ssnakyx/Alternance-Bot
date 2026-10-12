@@ -98,7 +98,6 @@ async function OfferDetail({ params }: { params: PageProps<"/offres/[id]">["para
         <DossierPanel
           id={offer.id}
           url={offer.url}
-          initialEmail={offer.apply_email ?? ""}
           initial={{
             letter_subject: offer.letter_subject,
             letter: offer.letter,
@@ -106,6 +105,8 @@ async function OfferDetail({ params }: { params: PageProps<"/offres/[id]">["para
             cover_letter: offer.cover_letter,
             short_message: offer.short_message,
             tailored_cv: offer.tailored_cv,
+            apply_email: offer.apply_email,
+            apply_email_source: offer.apply_email_source,
           }}
           alreadySent={applied}
           hasOriginalCv={hasOriginalCv}

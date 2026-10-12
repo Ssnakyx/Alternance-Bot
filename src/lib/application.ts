@@ -1,15 +1,17 @@
 import "server-only";
-import { tailorCv, writeApplication } from "./claude";
+import { findRecruiterEmail, tailorCv, writeApplication, type RecruiterContact } from "./claude";
 import { getCvPdf } from "./db";
+import { describeError as describe } from "./errors";
 import { attachmentName, renderCvPdf, renderLetterPdf } from "./pdf";
 import type { OfferRow, Profile } from "./types";
 
-export type DossierPart = "texts" | "cv";
+export type DossierPart = "texts" | "cv" | "email";
 
 /**
- * Prépare le dossier d'une offre : email, lettre de motivation, message court et CV adapté.
- * Les deux appels à l'IA partent en parallèle. Renvoie les colonnes à enregistrer et les
- * erreurs éventuelles (un CV qui échoue n'empêche pas d'avoir la lettre, et inversement).
+ * Prépare le dossier d'une offre : email, lettre de motivation, message court, CV adapté et,
+ * si l'offre n'en donne pas, l'adresse où envoyer la candidature. Les appels à l'IA partent en
+ * parallèle. Renvoie les colonnes à enregistrer et les erreurs éventuelles (un CV qui échoue
+ * n'empêche pas d'avoir la lettre, et inversement).
  */
 export async function prepareDossier(
   profile: Profile,
@@ -17,9 +19,13 @@ export async function prepareDossier(
   parts: DossierPart[],
 ): Promise<{ patch: Partial<OfferRow>; errors: string[] }> {
   const cvPdf = parts.includes("cv") ? await getCvPdf() : null;
-  const [texts, cv] = await Promise.allSettled([
+  // Inutile de chercher une adresse si l'offre en donne déjà une ou si on a déjà cherché
+  // (le bouton « Trouver l'email » relance la recherche à la demande).
+  const searchEmail = parts.includes("email") && !offer.apply_email && !offer.email_searched_at;
+  const [texts, cv, contact] = await Promise.allSettled([
     parts.includes("texts") ? writeApplication(profile, offer) : Promise.resolve(null),
     parts.includes("cv") && cvPdf ? tailorCv(profile, offer, cvPdf.base64) : Promise.resolve(null),
+    searchEmail ? findRecruiterEmail(offer) : Promise.resolve(null),
   ]);
 
   const patch: Partial<OfferRow> = {};
@@ -35,12 +41,19 @@ export async function prepareDossier(
   }
   if (cv.status === "fulfilled" && cv.value) patch.tailored_cv = cv.value;
   else if (cv.status === "rejected") errors.push(`CV adapté : ${describe(cv.reason)}`);
+  if (contact.status === "fulfilled" && contact.value) {
+    Object.assign(patch, contactPatch(contact.value));
+  } else if (contact.status === "rejected") {
+    errors.push(`recherche de l'email : ${describe(contact.reason)}`);
+  }
   if (parts.includes("cv") && !cvPdf) errors.push("CV adapté : ajoute d'abord ton CV en PDF dans le profil.");
   return { patch, errors };
 }
 
-function describe(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+/** Colonnes à enregistrer après une recherche d'email, trouvée ou non. */
+export function contactPatch(contact: RecruiterContact): Partial<OfferRow> {
+  const searched = { email_searched_at: new Date().toISOString() };
+  return contact.email ? { ...searched, apply_email: contact.email, apply_email_source: contact.source_url || null } : searched;
 }
 
 /** Les pièces jointes de la candidature : le CV (adapté ou d'origine) et la lettre en PDF. */

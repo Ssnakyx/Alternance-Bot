@@ -84,6 +84,15 @@ export function ProfileForm({ profile }: { profile: Profile }) {
           <input type="checkbox" name="include_remote" defaultChecked={s.include_remote} />
           Inclure les alternances en télétravail partout en France
         </label>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" name="web_search" defaultChecked={s.web_search} className="mt-1" />
+          <span>
+            Chercher aussi sur LinkedIn, Indeed, Welcome to the Jungle, HelloWork...
+            <span className="block text-xs text-slate-500">
+              L&apos;IA fait une recherche web à chaque actualisation (quelques centimes par jour).
+            </span>
+          </span>
+        </label>
       </fieldset>
 
       <fieldset className="space-y-3">
