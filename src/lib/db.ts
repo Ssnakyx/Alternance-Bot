@@ -77,6 +77,18 @@ export async function insertNewOffers(offers: NormalizedOffer[]): Promise<number
   return inserted?.length ?? 0;
 }
 
+/** Les dernières offres trouvées par une source, pour ne pas les chercher à nouveau. */
+export async function recentOffersFrom(source: NormalizedOffer["source"], limit: number): Promise<Pick<OfferRow, "title" | "company">[]> {
+  return check(
+    await db()
+      .from("offers")
+      .select("title, company")
+      .eq("source", source)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+  ) as Pick<OfferRow, "title" | "company">[];
+}
+
 export async function getUnscoredOffers(limit: number): Promise<OfferRow[]> {
   return check(
     await db()

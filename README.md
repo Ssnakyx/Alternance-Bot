@@ -64,8 +64,9 @@ Les sources d'offres sont facultatives : celles qui n'ont pas de clé sont simpl
 LinkedIn, Indeed, Welcome to the Jungle et HelloWork n'ont pas d'API publique et interdisent le
 scraping (ils bloquent d'ailleurs les serveurs comme ceux de Vercel). La source **Recherche web**
 les couvre autrement : l'IA cherche leurs offres via un moteur de recherche, comme tu le ferais à
-la main, et ne garde que celles dont elle a vu la page. Elle utilise la clé Anthropic et se
-désactive dans le profil (« Chercher aussi sur LinkedIn, Indeed... »).
+la main, et ne garde que celles dont elle a vu la page. Elle écarte les annonces d'écoles qui
+recrutent des élèves et les offres déjà trouvées les jours précédents. Elle utilise la clé
+Anthropic et se désactive dans le profil (« Chercher aussi sur LinkedIn, Indeed... »).
 
 ### 2. La base de données
 
@@ -101,8 +102,10 @@ notées, 5 dossiers avec CV adapté) coûte environ 1 à 2 $ ; les jours suivant
 nouvelles offres. Un dossier préparé à la main coûte environ 0,15 à 0,30 $. Pour dépenser moins,
 baisse le nombre de dossiers préparés chaque matin ou décoche « Adapter aussi mon CV » dans le profil.
 
-Les recherches sur le web coûtent en plus 0,01 $ par recherche, plus la lecture des pages :
-compte environ 0,30 à 0,60 $ par jour pour la source « Recherche web », et 0,10 à 0,25 $ par
+Les recherches sur le web coûtent en plus 0,01 $ par recherche, plus la lecture des pages. La
+source « Recherche web » lance trois recherches en parallèle (sites d'emploi généralistes, sites
+tech et pages carrières, postes avec de l'IA) : compte environ 1 à 2 $ à chaque fois qu'elle
+tourne (le matin, et à chaque clic sur « Chercher de nouvelles offres »), et 0,10 à 0,25 $ par
 adresse email cherchée (une seule fois par offre). Ce sont des ordres de grandeur, le détail
 exact est sur la console Claude.
 
