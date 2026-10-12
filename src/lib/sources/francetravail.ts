@@ -13,6 +13,9 @@ const SEARCH_URL = "https://api.francetravail.io/partenaire/offresdemploi/v2/off
 // E2 = contrat d'apprentissage, FS = contrat de professionnalisation.
 const ALTERNANCE_CONTRACTS = "E2,FS";
 
+/** Mots-clés des postes où l'on travaille avec l'IA, cherchés dans les métiers du profil (codes ROME). */
+const AI_KEYWORDS = ["IA", "intelligence artificielle"];
+
 interface FtOffer {
   id: string;
   intitule?: string;
@@ -82,13 +85,19 @@ export async function fetchFranceTravail(prefs: SearchPrefs): Promise<Normalized
   if (!clientId || !clientSecret) return [];
   const token = await getToken(clientId, clientSecret);
 
-  const offers = (
-    await search({ motsCles: prefs.keywords, departement: prefs.departement }, token)
-  ).map(toOffer);
+  // Les mots-clés du profil, puis ceux des postes avec de l'IA : une recherche par groupe.
+  const queries = [{ motsCles: prefs.keywords }];
+  if (prefs.ai_focus) {
+    const codeROME = prefs.romes.join(",");
+    queries.push(...AI_KEYWORDS.map((motsCles) => ({ motsCles, ...(codeROME ? { codeROME } : {}) })));
+  }
 
-  if (prefs.include_remote) {
-    const national = await search({ motsCles: prefs.keywords }, token);
-    offers.push(...national.map(toOffer).filter((o) => o.remote));
+  const offers: NormalizedOffer[] = [];
+  for (const query of queries) {
+    offers.push(...(await search({ ...query, departement: prefs.departement }, token)).map(toOffer));
+    if (prefs.include_remote) {
+      offers.push(...(await search(query, token)).map(toOffer).filter((o) => o.remote));
+    }
   }
   return offers;
 }

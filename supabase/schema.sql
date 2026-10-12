@@ -26,6 +26,7 @@ create table if not exists offers (
   apply_email text,
   apply_email_source text,      -- page où l'IA a trouvé l'email de recrutement
   email_searched_at timestamptz, -- dernière recherche d'email par l'IA
+  ai_work boolean,               -- le poste implique de travailler avec l'IA
   published_at timestamptz,
   score smallint,
   strengths jsonb not null default '[]'::jsonb,
@@ -53,6 +54,7 @@ alter table offers add column if not exists short_message text;
 alter table offers add column if not exists tailored_cv jsonb;
 alter table offers add column if not exists apply_email_source text;
 alter table offers add column if not exists email_searched_at timestamptz;
+alter table offers add column if not exists ai_work boolean;
 
 create index if not exists offers_status_score_idx on offers (status, score desc);
 

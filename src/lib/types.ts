@@ -69,6 +69,8 @@ export interface OfferRow extends NormalizedOffer {
   /** Date de la dernière recherche d'email par l'IA, trouvée ou non. */
   email_searched_at: string | null;
   score: number | null;
+  /** Le poste implique de travailler avec l'IA (repéré par l'IA au moment de la note). */
+  ai_work: boolean | null;
   strengths: string[];
   gaps: string[];
   scored_at: string | null;
@@ -98,6 +100,13 @@ export interface SearchPrefs {
   include_remote: boolean;
   /** Cherche aussi les offres publiées sur LinkedIn, Indeed, Welcome to the Jungle, HelloWork... via une recherche web. */
   web_search: boolean;
+  /** Cherche en plus les postes où l'on travaille avec l'IA et les fait remonter dans le classement. */
+  ai_focus: boolean;
+  /**
+   * Ce que le candidat sait faire et que son CV ne dit pas (par exemple « à l'aise avec Claude et
+   * Claude Code »). L'IA le traite comme vrai : notes, lettres et CV adapté peuvent s'en servir.
+   */
+  extra_skills: string;
   keywords: string;
   romes: string[];
   rhythm: string;
@@ -121,6 +130,8 @@ export const DEFAULT_SEARCH: SearchPrefs = {
   departement: "69",
   include_remote: true,
   web_search: true,
+  ai_focus: true,
+  extra_skills: "",
   keywords: "développeur",
   romes: ["M1805"],
   rhythm: "",

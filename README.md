@@ -13,7 +13,12 @@ suit ensuite tes candidatures jusqu'à la réponse.
   délai moyen de réponse. On y trouve aussi les candidatures par semaine, l'entonnoir, les sources,
   les compétences qui te manquent le plus souvent, l'activité récente et une liste « À faire ».
 - **Offres** : triées par score de compatibilité (0 à 100 %) avec points forts et manques, plus
-  des filtres pour le télétravail et les candidatures spontanées.
+  des filtres pour le télétravail, les candidatures spontanées et les postes avec de l'IA.
+- **Postes avec de l'IA** (option du profil, active par défaut) : l'IA cherche en plus les
+  alternances où l'on travaille avec l'IA (intégration de LLM, agents, automatisation, IA
+  générative), les marque « IA » et les fait remonter dans le classement. Le champ « Ce que tu
+  sais faire en plus de ton CV » (par exemple « à l'aise avec Claude et Claude Code ») sert à
+  noter les offres, à écrire les lettres et à adapter le CV, comme le reste de ton CV.
 - **Fiche offre, dossier de candidature** préparé par l'IA, modifiable partie par partie :
   - **lettre de motivation** au format courrier (PDF avec ton nom, l'entreprise et la date) ;
   - **CV adapté au poste** : l'IA réordonne, reformule et met en avant ce qui correspond à l'offre,

@@ -364,6 +364,8 @@ export async function saveProfileAction(_prev: ActionResult, formData: FormData)
         departement: text("departement") || current.search.departement,
         include_remote: formData.get("include_remote") === "on",
         web_search: formData.get("web_search") === "on",
+        ai_focus: formData.get("ai_focus") === "on",
+        extra_skills: text("extra_skills"),
         keywords: text("keywords") || current.search.keywords,
         romes: text("romes")
           .split(/[\s,;]+/)
