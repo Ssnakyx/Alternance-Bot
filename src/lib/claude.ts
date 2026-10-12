@@ -6,13 +6,14 @@ import { z } from "zod";
 import type { CvSummary, OfferRow, Profile } from "./types";
 
 /**
- * Deux modèles selon la tâche, pour garder un coût minime :
- * - "fast" (Haiku) pour le volume : lecture du CV, notes des offres, lecture des réponses ;
- * - "writing" (Opus) pour ce que lit le recruteur : lettres et relances.
- * Modifiables sans toucher au code via CLAUDE_MODEL_FAST / CLAUDE_MODEL_WRITING.
+ * Modèle par type de tâche (Opus 5.5 partout par défaut) :
+ * - "fast" pour le volume : lecture du CV, notes des offres, lecture des réponses ;
+ * - "writing" pour ce que lit le recruteur : lettres et relances.
+ * Modifiables sans toucher au code via CLAUDE_MODEL_FAST / CLAUDE_MODEL_WRITING
+ * (par exemple claude-haiku-5-5 pour "fast", environ 40 fois moins cher).
  */
 const MODELS = {
-  fast: process.env.CLAUDE_MODEL_FAST || "claude-haiku-5-5",
+  fast: process.env.CLAUDE_MODEL_FAST || "claude-opus-5-5",
   writing: process.env.CLAUDE_MODEL_WRITING || "claude-opus-5-5",
 };
 type Tier = keyof typeof MODELS;

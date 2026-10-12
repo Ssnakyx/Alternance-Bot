@@ -68,14 +68,13 @@ Ouvre http://localhost:3000 et connecte-toi avec `APP_PASSWORD`. Dans **Profil**
 
 ## Coût de l'IA
 
-L'API Claude se paie à part (crédits prépayés sur console.anthropic.com) : l'abonnement Claude
-Pro ou Max ne la couvre pas. Pour garder un coût minime, l'appli utilise deux modèles :
+L'API Claude se paie à part (crédits prépayés sur la console Claude) : l'abonnement Claude Pro
+ou Max ne la couvre pas. Toute l'IA utilise **Claude Opus 5.5**. Une journée chargée (60 offres
+notées, 5 lettres) coûte environ 0,50 à 1 $ ; les jours suivants, il y a moins de nouvelles offres.
 
-- **Claude Haiku 5.5** pour le volume : lecture du CV, notes des offres, lecture des réponses ;
-- **Claude Opus 5.5** pour ce que lit le recruteur : lettres et relances.
-
-Compte environ 0,10 à 0,25 $ par jour au maximum (60 offres notées, 5 lettres). Pour changer de
-modèle sans toucher au code, renseigne `CLAUDE_MODEL_FAST` ou `CLAUDE_MODEL_WRITING`.
+Pour réduire le coût, mets `CLAUDE_MODEL_FAST=claude-haiku-5-5` : le tri des offres, la lecture du
+CV et celle des réponses passent alors sur Haiku (environ 40 fois moins cher), et les lettres
+restent sur Opus. `CLAUDE_MODEL_WRITING` règle le modèle des lettres et relances.
 
 ## Organisation du code
 
