@@ -23,15 +23,19 @@ suit ensuite tes candidatures jusqu'à la réponse.
   - **email d'accompagnement** et **message court** pour les formulaires en ligne ou LinkedIn.
 
   Tu l'envoies par email avec le CV adapté et la lettre en pièces jointes, ou tu télécharges les
-  PDF pour le formulaire de candidature. On y trouve aussi une relance préparée par l'IA et
-  l'historique.
+  PDF pour le formulaire de candidature. Quand l'offre ne donne pas d'adresse, l'IA cherche sur le
+  web l'email de recrutement de l'entreprise (page carrières, offre, contact) et te montre la page
+  où elle l'a trouvé : tu vérifies, puis tu envoies en un clic. On y trouve aussi une relance
+  préparée par l'IA et l'historique.
 - **Suivi** : tableau Lettre prête → Envoyée → Relancée → Entretien → Acceptée / Refusée.
-- **Automatique, chaque matin** (Vercel Cron, 6 h UTC) :
-  1. récupération des nouvelles offres (La Bonne Alternance, France Travail, Adzuna) ;
-  2. notation par l'IA ;
-  3. dossiers préparés pour les meilleures offres, CV adapté compris (réglable dans le profil) ;
-  4. lecture de ta boîte Gmail. Quand une entreprise répond, l'IA lit l'email et passe la
-     candidature en « Entretien », « Acceptée » ou « Refusée » toute seule.
+- **Automatique, chaque matin** (Vercel Cron, en deux temps pour tenir dans les 5 minutes
+  qu'accorde Vercel à chaque appel) :
+  1. vers 5 h UTC, récupération des nouvelles offres (La Bonne Alternance, France Travail, Adzuna
+     et la recherche web), notation par l'IA et lecture de ta boîte Gmail. Quand une entreprise
+     répond, l'IA lit l'email et passe la candidature en « Entretien », « Acceptée » ou
+     « Refusée » toute seule ;
+  2. vers 7 h UTC, dossiers préparés pour les meilleures offres : lettre, CV adapté (réglable dans
+     le profil) et adresse où envoyer la candidature.
 
 ## Stack
 
@@ -53,6 +57,12 @@ Gmail (envoi SMTP et lecture IMAP) · Vercel.
 
 Les sources d'offres sont facultatives : celles qui n'ont pas de clé sont simplement ignorées.
 
+LinkedIn, Indeed, Welcome to the Jungle et HelloWork n'ont pas d'API publique et interdisent le
+scraping (ils bloquent d'ailleurs les serveurs comme ceux de Vercel). La source **Recherche web**
+les couvre autrement : l'IA cherche leurs offres via un moteur de recherche, comme tu le ferais à
+la main, et ne garde que celles dont elle a vu la page. Elle utilise la clé Anthropic et se
+désactive dans le profil (« Chercher aussi sur LinkedIn, Indeed... »).
+
 ### 2. La base de données
 
 Dans Supabase, ouvre **SQL Editor > New query**, colle le contenu de `supabase/schema.sql`, puis clique sur **Run**.
@@ -73,8 +83,11 @@ Ouvre http://localhost:3000 et connecte-toi avec `APP_PASSWORD`. Dans **Profil**
 
 1. Importe le dépôt sur [vercel.com](https://vercel.com/new).
 2. Ajoute toutes les variables de `.env.example` dans **Settings > Environment Variables**.
-3. Déploie. La tâche du matin est déclarée dans `vercel.json`, et Vercel envoie `CRON_SECRET`
-   tout seul pour l'authentifier.
+3. Déploie. Les deux tâches du matin sont déclarées dans `vercel.json`, et Vercel envoie
+   `CRON_SECRET` tout seul pour les authentifier.
+
+Après avoir ajouté ou modifié une variable, relance un déploiement (**Deployments > ... > Redeploy**) :
+Vercel ne la prend en compte qu'au déploiement suivant.
 
 ## Coût de l'IA
 
@@ -83,6 +96,11 @@ ou Max ne la couvre pas. Toute l'IA utilise **Claude Opus 5.5**. Une journée ch
 notées, 5 dossiers avec CV adapté) coûte environ 1 à 2 $ ; les jours suivants, il y a moins de
 nouvelles offres. Un dossier préparé à la main coûte environ 0,15 à 0,30 $. Pour dépenser moins,
 baisse le nombre de dossiers préparés chaque matin ou décoche « Adapter aussi mon CV » dans le profil.
+
+Les recherches sur le web coûtent en plus 0,01 $ par recherche, plus la lecture des pages :
+compte environ 0,30 à 0,60 $ par jour pour la source « Recherche web », et 0,10 à 0,25 $ par
+adresse email cherchée (une seule fois par offre). Ce sont des ordres de grandeur, le détail
+exact est sur la console Claude.
 
 Pour réduire le coût, mets `CLAUDE_MODEL_FAST=claude-haiku-5-5` : le tri des offres, la lecture du
 CV et celle des réponses passent alors sur Haiku (environ 40 fois moins cher), et les lettres
@@ -93,10 +111,10 @@ restent sur Opus. `CLAUDE_MODEL_WRITING` règle le modèle des lettres et relanc
 ```
 src/
   app/                 pages (tableau de bord, offres, suivi, profil, connexion) et actions serveur
-  app/api/cron/        routine du matin
+  app/api/cron/        routine du matin (offres, puis dossiers dans cron/dossiers)
   components/          composants d'interface
   lib/sources/         une API d'offres par fichier, toutes ramenées au même format
-  lib/claude.ts        appels à l'IA (CV, score, dossier, CV adapté, relance, lecture des réponses)
+  lib/claude.ts        appels à l'IA (CV, score, dossier, CV adapté, recherches web, relance, réponses)
   lib/pdf.tsx          mise en page PDF du CV adapté et de la lettre
   lib/inbox.ts         lecture des réponses dans Gmail
   lib/pipeline.ts      enchaînement de la routine

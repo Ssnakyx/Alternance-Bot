@@ -2,6 +2,7 @@ import "server-only";
 import { prepareDossier, type DossierPart } from "./application";
 import { scoreOffers } from "./claude";
 import { addEvent, getProfile, getUnscoredOffers, insertNewOffers, topOffersWithoutLetter, updateOffer } from "./db";
+import { describeError as describe } from "./errors";
 import { syncInboxReplies } from "./inbox";
 import { fetchAllOffers } from "./sources";
 import type { OfferSource, Profile } from "./types";
@@ -14,15 +15,10 @@ export interface RefreshReport {
   fetched: number;
   inserted: number;
   scored: number;
-  lettersPrepared: number;
   repliesFound: number;
   statusChanges: number;
   perSource: Partial<Record<OfferSource, number>>;
   errors: string[];
-}
-
-function describe(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 export async function scorePendingOffers(profile: Profile, errors: string[]): Promise<number> {
@@ -50,20 +46,35 @@ export async function scorePendingOffers(profile: Profile, errors: string[]): Pr
   return scored;
 }
 
+export interface PrepareReport {
+  prepared: number;
+  errors: string[];
+}
+
 /**
- * Prépare le dossier des meilleures offres (lettre, email, message court et, si l'option est
- * active, CV adapté) : il t'attend dans "Lettre prête", rien n'est envoyé.
+ * Prépare le dossier des meilleures offres (lettre, email, message court, adresse où postuler et,
+ * si l'option est active, CV adapté) : il t'attend dans "Lettre prête", rien n'est envoyé.
+ * Lancé séparément de la recherche d'offres pour que chaque étape tienne dans les 5 minutes
+ * qu'accorde Vercel.
  */
-async function prepareTopLetters(profile: Profile, errors: string[]): Promise<number> {
+export async function prepareTopDossiers(): Promise<PrepareReport> {
+  const profile = await getProfile();
   const { auto_letters, auto_letter_min_score, auto_tailor_cv } = profile.search;
-  if (auto_letters <= 0) return 0;
+  if (!profile.cv_summary || auto_letters <= 0) return { prepared: 0, errors: [] };
+  // Une même erreur (clé refusée, CV manquant...) touche souvent toutes les offres : on la regroupe.
+  const failures = new Map<string, string[]>();
   const offers = await topOffersWithoutLetter(auto_letter_min_score, auto_letters);
-  const parts: DossierPart[] = auto_tailor_cv ? ["texts", "cv"] : ["texts"];
+  const parts: DossierPart[] = auto_tailor_cv ? ["texts", "cv", "email"] : ["texts", "email"];
   const settled = await Promise.allSettled(
     offers.map(async (offer) => {
-      const { patch, errors: partErrors } = await prepareDossier(profile, offer, parts);
-      errors.push(...partErrors.map((e) => `${offer.company || offer.title} : ${e}`));
-      if (!patch.letter) throw new Error("dossier non préparé");
+      const todo = parts.filter((part) => part !== "cv" || !offer.tailored_cv);
+      const { patch, errors: partErrors } = await prepareDossier(profile, offer, todo);
+      for (const e of partErrors) failures.set(e, [...(failures.get(e) ?? []), offer.company || offer.title]);
+      if (!patch.letter) {
+        // Garde quand même ce qui a abouti (l'adresse trouvée, le CV) pour ne pas le repayer demain.
+        if (Object.keys(patch).length > 0) await updateOffer(offer.id, patch);
+        throw new Error("dossier non préparé");
+      }
       await updateOffer(offer.id, { ...patch, status: "draft" });
       await addEvent({
         offer_id: offer.id,
@@ -75,12 +86,13 @@ async function prepareTopLetters(profile: Profile, errors: string[]): Promise<nu
       });
     }),
   );
-  return settled.filter((outcome) => outcome.status === "fulfilled").length;
+  const errors = [...failures].map(([e, offers]) => (offers.length === 1 ? `${offers[0]} : ${e}` : `${e} (${offers.length} offres)`));
+  return { prepared: settled.filter((outcome) => outcome.status === "fulfilled").length, errors };
 }
 
 /**
- * La routine complète (lancée chaque matin, ou à la main depuis le tableau de bord) :
- * nouvelles offres, notation, lettres préparées pour le top, réponses lues dans Gmail.
+ * La recherche du matin (ou du bouton du tableau de bord) : nouvelles offres, notation,
+ * réponses lues dans Gmail. Les dossiers sont préparés ensuite par prepareTopDossiers.
  */
 export async function refreshOffers(): Promise<RefreshReport> {
   const profile = await getProfile();
@@ -93,7 +105,6 @@ export async function refreshOffers(): Promise<RefreshReport> {
   }
   const inserted = await insertNewOffers(offers);
   const scored = await scorePendingOffers(profile, errors);
-  const lettersPrepared = await prepareTopLetters(profile, errors);
 
   let repliesFound = 0;
   let statusChanges = 0;
@@ -109,10 +120,9 @@ export async function refreshOffers(): Promise<RefreshReport> {
     fetched: offers.length,
     inserted,
     scored,
-    lettersPrepared,
     repliesFound,
     statusChanges,
     perSource,
-    errors,
+    errors: [...new Set(errors)],
   };
 }

@@ -5,6 +5,9 @@ import { RefreshButton } from "@/components/RefreshButton";
 import { countByStatus, listOffers } from "@/lib/db";
 import type { OfferStatus } from "@/lib/types";
 
+// Le bouton « Chercher de nouvelles offres » appelle l'IA (recherche web, notation, dossiers).
+export const maxDuration = 300;
+
 const TABS = {
   todo: { label: "À traiter", statuses: ["new"] },
   ready: { label: "Lettres prêtes", statuses: ["draft"] },

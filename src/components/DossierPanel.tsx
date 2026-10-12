@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import {
+  findEmailAction,
   prepareDossierAction,
   retouchCvAction,
   saveDossierAction,
@@ -12,6 +13,7 @@ import {
 } from "@/app/actions";
 import { CvEditor } from "@/components/CvEditor";
 import { CvPreview } from "@/components/CvPreview";
+import type { DossierPart } from "@/lib/application";
 import type { DossierTexts, TailoredCv } from "@/lib/types";
 
 type Tab = "email" | "letter" | "cv" | "message";
@@ -27,7 +29,6 @@ const TABS: { id: Tab; label: string }[] = [
 interface Props {
   id: string;
   url: string | null;
-  initialEmail: string;
   initial: DossierResult;
   alreadySent: boolean;
   hasOriginalCv: boolean;
@@ -47,7 +48,15 @@ function textsOf(d: DossierResult): DossierTexts {
   };
 }
 
-export function DossierPanel({ id, url, initialEmail, initial, alreadySent, hasOriginalCv, identity }: Props) {
+function hostname(link: string): string {
+  try {
+    return new URL(link).hostname.replace(/^www\./, "");
+  } catch {
+    return link;
+  }
+}
+
+export function DossierPanel({ id, url, initial, alreadySent, hasOriginalCv, identity }: Props) {
   const [tab, setTab] = useState<Tab>("letter");
   const [texts, setTexts] = useState<DossierTexts>(() => textsOf(initial));
   const [cv, setCv] = useState<TailoredCv | null>(initial.tailored_cv);
@@ -56,7 +65,11 @@ export function DossierPanel({ id, url, initialEmail, initial, alreadySent, hasO
   const [dirty, setDirty] = useState({ texts: false, cv: false });
   const [editingCv, setEditingCv] = useState(false);
   const [instructions, setInstructions] = useState("");
-  const [email, setEmail] = useState(initialEmail);
+  const [email, setEmail] = useState(initial.apply_email ?? "");
+  // Adresse trouvée par l'IA et page où elle est publiée, pour vérifier avant d'envoyer.
+  const [found, setFound] = useState(
+    initial.apply_email && initial.apply_email_source ? { email: initial.apply_email, source: initial.apply_email_source } : null,
+  );
   const [attach, setAttach] = useState({ tailoredCv: true, coverLetter: true });
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -91,7 +104,7 @@ export function DossierPanel({ id, url, initialEmail, initial, alreadySent, hasO
     setDirty((d) => ({ ...d, cv: false }));
   };
 
-  const prepare = (parts: ("texts" | "cv")[]) => {
+  const prepare = (parts: DossierPart[]) => {
     const overwrites =
       (parts.includes("texts") && dirty.texts) || (parts.includes("cv") && dirty.cv);
     if (overwrites && !window.confirm("Tes modifications non enregistrées seront remplacées. Continuer ?")) return;
@@ -104,10 +117,28 @@ export function DossierPanel({ id, url, initialEmail, initial, alreadySent, hasO
           setDirty((d) => ({ ...d, texts: false }));
         }
         if (parts.includes("cv") && result.data.tailored_cv) replaceCv(result.data.tailored_cv);
+        const { apply_email, apply_email_source } = result.data;
+        if (apply_email && !email.trim()) {
+          setEmail(apply_email);
+          if (apply_email_source) setFound({ email: apply_email, source: apply_email_source });
+        }
       }
       return { ok: true, text: result.message ?? "Prêt." };
     });
   };
+
+  const findEmail = () =>
+    run("email", async () => {
+      const result = await findEmailAction(id);
+      if (!result.ok) return { ok: false, text: result.error };
+      const contact = result.data;
+      if (!contact?.email) {
+        return { ok: false, text: `Pas d'adresse publique trouvée${contact?.note ? ` : ${contact.note}` : "."} Postule via le lien.` };
+      }
+      setEmail(contact.email);
+      setFound(contact.source ? { email: contact.email, source: contact.source } : null);
+      return { ok: true, text: result.message ?? `Adresse trouvée : ${contact.email}` };
+    });
 
   const retouch = () =>
     run("retouch", async () => {
@@ -181,7 +212,7 @@ export function DossierPanel({ id, url, initialEmail, initial, alreadySent, hasO
           </p>
         </div>
         <button
-          onClick={() => prepare(["texts", "cv"])}
+          onClick={() => prepare(["texts", "cv", "email"])}
           disabled={pending}
           className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
         >
@@ -190,7 +221,8 @@ export function DossierPanel({ id, url, initialEmail, initial, alreadySent, hasO
       </div>
       {busy === "all" && (
         <p className="rounded-lg bg-indigo-50 p-3 text-sm text-indigo-900">
-          Rédaction de la lettre et adaptation du CV en cours. Ça prend en général une à deux minutes.
+          Rédaction de la lettre, adaptation du CV et recherche de l&apos;adresse où postuler. Ça prend en
+          général une à deux minutes.
         </p>
       )}
 
@@ -400,10 +432,28 @@ export function DossierPanel({ id, url, initialEmail, initial, alreadySent, hasO
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="Pas d'email connu : postule via le lien de l'offre"
+            placeholder="Pas d'email connu pour l'instant"
             className={field}
           />
         </label>
+        {found && found.email === email.trim() && (
+          <p className="text-xs text-slate-500">
+            Trouvée par l&apos;IA sur{" "}
+            <a href={found.source} target="_blank" rel="noopener noreferrer" className="underline">
+              {hostname(found.source)}
+            </a>
+            . Vérifie que c&apos;est la bonne entreprise avant d&apos;envoyer.
+          </p>
+        )}
+        {!sendable && (
+          <button
+            onClick={findEmail}
+            disabled={pending}
+            className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+          >
+            {busy === "email" ? "Recherche sur le web..." : "Trouver l'email de recrutement avec l'IA"}
+          </button>
+        )}
         {sendable ? (
           <>
             <div className="space-y-1 text-sm">
@@ -448,12 +498,12 @@ export function DossierPanel({ id, url, initialEmail, initial, alreadySent, hasO
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block w-full rounded-lg bg-emerald-600 px-4 py-2 text-center font-medium text-white hover:bg-emerald-700"
+                className="block w-full rounded-lg px-4 py-2 text-center text-sm font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50"
               >
-                Ouvrir le formulaire de candidature ↗
+                Ou postuler via le formulaire de l&apos;offre ↗
               </a>
               <p className="text-xs text-slate-500">
-                Télécharge le CV et la lettre avec « Voir le PDF », et colle le message court dans le formulaire.
+                Pour le formulaire : télécharge le CV et la lettre avec « Voir le PDF », et colle le message court.
               </p>
             </>
           )

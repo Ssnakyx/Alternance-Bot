@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { z } from "zod";
-import type { CvSummary, OfferRow, Profile, TailoredCv } from "./types";
+import type { CvSummary, OfferRow, Profile, SearchPrefs, TailoredCv } from "./types";
 
 /**
  * Modèle par type de tâche (Opus 5.5 partout par défaut) :
@@ -327,6 +327,204 @@ export async function tailorCv(
 export function toCvSummary(cv: ParsedCv): CvSummary {
   const { headline, summary, skills, experiences, education, projects, languages } = cv;
   return { headline, summary, skills, experiences, education, projects, languages };
+}
+
+// ---------- Recherches sur le web ----------
+
+/**
+ * Laisse l'IA chercher sur le web (recherche + lecture de pages, exécutées par Anthropic), puis
+ * conclure en appelant l'outil `report` dont le schéma est garanti. Renvoie l'entrée de cet appel.
+ * Au dernier tour, ou quand le temps alloué est presque écoulé, l'IA est obligée de conclure
+ * avec ce qu'elle a trouvé.
+ */
+async function searchThenReport(opts: {
+  system: string;
+  prompt: string;
+  report: Anthropic.Tool;
+  maxSearches: number;
+  maxFetches: number;
+  maxTokens: number;
+  /** Durée totale visée, conclusion comprise (les fonctions Vercel s'arrêtent à 300 s). */
+  budgetMs: number;
+}): Promise<unknown> {
+  const deadline = Date.now() + opts.budgetMs;
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content: opts.prompt }];
+  const tools: Anthropic.ToolUnion[] = [
+    {
+      type: "web_search_20260209",
+      name: "web_search",
+      max_uses: opts.maxSearches,
+      user_location: { type: "approximate", country: "FR", city: "Lyon", timezone: "Europe/Paris" },
+    },
+    { type: "web_fetch_20260209", name: "web_fetch", max_uses: opts.maxFetches },
+    opts.report,
+  ];
+  const MAX_TURNS = 5;
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const remaining = deadline - Date.now();
+    const last = turn === MAX_TURNS - 1 || remaining < 75_000;
+    const response = await anthropic().messages.create(
+      {
+        model: MODELS.fast,
+        max_tokens: opts.maxTokens,
+        system: opts.system,
+        tools,
+        tool_choice: last ? { type: "tool", name: opts.report.name } : { type: "auto" },
+        messages,
+      },
+      { timeout: Math.max(60_000, Math.min(150_000, remaining)) },
+    );
+    const report = response.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === opts.report.name,
+    );
+    if (report) return report.input;
+    messages.push({ role: "assistant", content: response.content });
+    if (response.stop_reason !== "pause_turn") {
+      // L'IA a répondu en texte sans conclure : on lui demande le résultat au tour suivant.
+      messages.push({ role: "user", content: `Appelle maintenant ${opts.report.name} avec ce que tu as trouvé.` });
+      turn = Math.max(turn, MAX_TURNS - 2);
+    }
+    if (last) break;
+  }
+  return null;
+}
+
+// ---------- Email de recrutement ----------
+
+export interface RecruiterContact {
+  email: string | null;
+  source_url: string;
+  note: string;
+}
+
+const REPORT_CONTACT: Anthropic.Tool = {
+  name: "report_contact",
+  description:
+    "Donne le résultat de la recherche : l'adresse email trouvée (ou une chaîne vide), la page où elle " +
+    "apparaît et une phrase d'explication.",
+  strict: true,
+  input_schema: {
+    type: "object",
+    properties: {
+      email: { type: "string", description: "Adresse trouvée telle qu'écrite sur la page, ou chaîne vide." },
+      source_url: { type: "string", description: "URL de la page où l'adresse apparaît, ou chaîne vide." },
+      note: { type: "string", description: "Une phrase en français : quel type d'adresse, ou pourquoi rien." },
+    },
+    required: ["email", "source_url", "note"],
+    additionalProperties: false,
+  },
+};
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
+
+/**
+ * Cherche sur le web une adresse email publique pour envoyer une candidature à cette entreprise
+ * (recrutement, RH ou contact général), avec la page où elle est publiée. Jamais d'adresse devinée
+ * ni d'adresse personnelle d'un salarié qui ne serait pas publiée pour recevoir des candidatures.
+ */
+export async function findRecruiterEmail(
+  offer: Pick<OfferRow, "title" | "company" | "location" | "url" | "kind" | "description">,
+): Promise<RecruiterContact> {
+  const input = (await searchThenReport({
+    system:
+      "Tu aides un étudiant à trouver où envoyer une candidature. Tu ne donnes qu'une adresse que tu as " +
+      "lue sur une page web (site de l'entreprise de préférence, ou l'offre elle-même), jamais une adresse " +
+      "devinée ou reconstruite (prenom.nom@...). Pas d'adresse personnelle d'un salarié, sauf si l'offre la " +
+      "donne explicitement pour postuler. Si tu n'es pas sûr, renvoie une chaîne vide.",
+    prompt:
+      `Entreprise : ${offer.company}\nAdresse : ${offer.location || "inconnue"}\n` +
+      `${offer.kind === "spontaneous" ? "Candidature spontanée en alternance" : `Offre : ${offer.title}`}\n` +
+      `Lien connu : ${offer.url ?? "aucun"}\nExtrait : ${offer.description.slice(0, 1500)}\n\n` +
+      "Trouve l'adresse email à laquelle un étudiant peut envoyer sa candidature en alternance à cette " +
+      "entreprise, dans cet ordre de préférence : adresse indiquée dans l'offre pour postuler, adresse de " +
+      "recrutement ou RH (recrutement@, rh@, jobs@...), adresse de contact générale de l'entreprise. " +
+      "Vérifie que c'est bien la même entreprise (nom et ville). Puis appelle report_contact.",
+    report: REPORT_CONTACT,
+    maxSearches: 4,
+    maxFetches: 4,
+    maxTokens: 4000,
+    budgetMs: 150_000,
+  })) as { email?: string; source_url?: string; note?: string } | null;
+  if (!input) return { email: null, source_url: "", note: "Aucune adresse trouvée." };
+  const email = (input.email ?? "").trim();
+  return {
+    email: EMAIL_RE.test(email) ? email.toLowerCase() : null,
+    source_url: (input.source_url ?? "").trim(),
+    note: (input.note ?? "").trim(),
+  };
+}
+
+// ---------- Offres trouvées sur le web ----------
+
+export interface WebOffer {
+  title: string;
+  company: string;
+  location: string;
+  url: string;
+  remote: boolean;
+  summary: string;
+  published: string;
+}
+
+const REPORT_OFFERS: Anthropic.Tool = {
+  name: "report_offers",
+  description: "Donne la liste des offres d'alternance trouvées, chacune avec le lien direct vers sa page.",
+  strict: true,
+  input_schema: {
+    type: "object",
+    properties: {
+      offers: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Intitulé du poste tel qu'affiché." },
+            company: { type: "string", description: "Entreprise, ou chaîne vide si elle n'est pas affichée." },
+            location: { type: "string", description: "Ville ou « Télétravail »." },
+            url: { type: "string", description: "Lien direct vers la page de l'offre, vu dans les résultats." },
+            remote: { type: "boolean", description: "Vrai si l'offre est en télétravail total ou partiel." },
+            summary: { type: "string", description: "2 à 4 phrases : missions, technologies, rythme si indiqué." },
+            published: { type: "string", description: "Date de publication AAAA-MM-JJ si connue, sinon vide." },
+          },
+          required: ["title", "company", "location", "url", "remote", "summary", "published"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["offers"],
+    additionalProperties: false,
+  },
+};
+
+/**
+ * Cherche via un moteur de recherche les offres d'alternance publiées sur les sites d'emploi qui
+ * n'ont pas d'API publique (LinkedIn, Indeed, Welcome to the Jungle, HelloWork...). L'IA ne
+ * renvoie que des offres dont elle a vu la page dans les résultats, avec leur lien.
+ */
+export async function searchWebOffers(prefs: SearchPrefs): Promise<WebOffer[]> {
+  const where = prefs.include_remote
+    ? `à ${prefs.city} (rayon ${prefs.radius_km} km) ou en télétravail depuis la France`
+    : `à ${prefs.city} (rayon ${prefs.radius_km} km)`;
+  const input = (await searchThenReport({
+    system:
+      "Tu cherches des offres d'alternance pour un étudiant. Tu ne renvoies que des offres réelles dont tu " +
+      "as vu la page dans les résultats de recherche ou en la lisant, avec leur lien direct. Tu n'inventes " +
+      "jamais d'offre, d'entreprise ni de lien. Tu écartes les CDI, CDD, stages, offres expirées et offres " +
+      "pour profils seniors.",
+    prompt:
+      `Trouve des offres d'alternance (contrat d'apprentissage ou de professionnalisation) de ` +
+      `${prefs.keywords || "développeur"} fullstack ou web, ${where}, publiées ces dernières semaines.\n` +
+      "Cherche sur les sites d'emploi : Welcome to the Jungle, HelloWork, LinkedIn, Indeed, JobTeaser, " +
+      "APEC, Meteojob, et les pages carrières d'entreprises. Fais plusieurs recherches différentes " +
+      "(par site, par intitulé : développeur fullstack, développeur web, React, Node.js...).\n" +
+      "Renvoie jusqu'à 20 offres avec report_offers.",
+    report: REPORT_OFFERS,
+    maxSearches: 8,
+    maxFetches: 4,
+    maxTokens: 12000,
+    budgetMs: 200_000,
+  })) as { offers?: WebOffer[] } | null;
+  return (input?.offers ?? []).filter((o) => /^https?:\/\//.test(o.url) && o.title.trim());
 }
 
 // ---------- Relance ----------
