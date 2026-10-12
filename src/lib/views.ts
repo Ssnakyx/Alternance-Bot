@@ -30,5 +30,11 @@ export async function loadOfferDetail(id: string) {
   await connection();
   const [offer, events, profile] = await Promise.all([getOffer(id), listEvents(id), getProfile()]);
   if (!offer) return null;
-  return { offer, events, followUpDue: isFollowUpDue(offer, profile.search.follow_up_days) };
+  return {
+    offer,
+    events,
+    followUpDue: isFollowUpDue(offer, profile.search.follow_up_days),
+    identity: { full_name: profile.full_name, email: profile.email, phone: profile.phone },
+    hasOriginalCv: Boolean(profile.cv_filename),
+  };
 }

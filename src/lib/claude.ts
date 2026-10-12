@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { z } from "zod";
-import type { CvSummary, OfferRow, Profile } from "./types";
+import type { CvSummary, OfferRow, Profile, TailoredCv } from "./types";
 
 /**
  * Modèle par type de tâche (Opus 5.5 partout par défaut) :
@@ -168,44 +168,159 @@ export async function scoreOffers(profile: Profile, offers: OfferRow[]): Promise
   return results.filter((r) => known.has(r.id));
 }
 
-// ---------- Lettre de motivation ----------
+// ---------- Dossier de candidature ----------
 
-const LetterSchema = z.object({ subject: z.string(), body: z.string() });
+function offerBrief(offer: OfferRow): string {
+  return (
+    `${offer.kind === "spontaneous" ? "Candidature spontanée auprès de cette entreprise" : "Offre"} :\n` +
+    JSON.stringify(
+      {
+        titre: offer.title,
+        entreprise: offer.company,
+        lieu: offer.location,
+        teletravail: offer.remote,
+        description: offer.description,
+        points_forts_identifies: offer.strengths,
+      },
+      null,
+      2,
+    )
+  );
+}
 
-export async function writeLetter(
-  profile: Profile,
-  offer: OfferRow,
-): Promise<{ subject: string; body: string }> {
+const ApplicationSchema = z.object({
+  email_subject: z.string(),
+  email_body: z.string(),
+  letter_title: z.string(),
+  letter_body: z.string(),
+  short_message: z.string(),
+});
+
+export type ApplicationDraft = z.infer<typeof ApplicationSchema>;
+
+/** Rédige tout le texte d'une candidature : email, lettre de motivation et message court. */
+export async function writeApplication(profile: Profile, offer: OfferRow): Promise<ApplicationDraft> {
+  const signature = profile.signature || profile.full_name;
   return structured({
     tier: "writing",
-    schema: LetterSchema,
+    schema: ApplicationSchema,
     effort: "medium",
     system:
-      "Tu rédiges des candidatures d'alternance en français, envoyées par email. Style : direct, " +
-      "sincère, sans formules creuses ni superlatifs. Tu n'inventes aucune expérience, compétence ou " +
-      "information absente du profil. Pas de champ à compléter entre crochets : si une information " +
-      "manque, n'en parle pas.",
+      "Tu rédiges des candidatures d'alternance en français. Style : direct, sincère, sans formules " +
+      "creuses ni superlatifs. Tu n'inventes aucune expérience, compétence ou information absente du " +
+      "profil. Pas de champ à compléter entre crochets : si une information manque, n'en parle pas.",
     content:
       `Profil du candidat :\n${candidateBrief(profile)}\n\n` +
       `Nom : ${profile.full_name}\nEmail : ${profile.email}\nTéléphone : ${profile.phone}\n` +
-      `Signature souhaitée : ${profile.signature || profile.full_name}\n\n` +
-      `${offer.kind === "spontaneous" ? "Candidature spontanée auprès de cette entreprise" : "Offre"} :\n` +
-      JSON.stringify(
-        {
-          titre: offer.title,
-          entreprise: offer.company,
-          lieu: offer.location,
-          teletravail: offer.remote,
-          description: offer.description,
-          points_forts_identifies: offer.strengths,
-        },
-        null,
-        2,
-      ) +
-      "\n\nÉcris l'email de candidature : `subject` (objet court qui cite le poste et l'alternance) " +
-      "et `body` (180 à 280 mots, de « Bonjour » à la signature). Relie 2 ou 3 éléments précis du " +
-      "profil aux besoins de l'entreprise, mentionne le rythme, la date de début et l'école s'ils sont " +
-      "connus, et indique que le CV est en pièce jointe.",
+      `Signature des emails : ${signature}\n\n${offerBrief(offer)}\n\n` +
+      "Rédige le dossier de candidature :\n" +
+      "- `letter_title` : la ligne d'objet de la lettre, sans le mot « Objet » (par exemple « Candidature " +
+      "en alternance au poste de développeur fullstack »).\n" +
+      "- `letter_body` : la lettre de motivation, 250 à 350 mots, de « Madame, Monsieur, » jusqu'à la " +
+      "formule de politesse incluse, sans signature (le nom est ajouté ensuite). Trois ou quatre " +
+      "paragraphes séparés par une ligne vide : ce qui attire le candidat chez cette entreprise et dans " +
+      "ce poste, ce qu'il apporte en reliant 2 ou 3 éléments précis du profil aux besoins de l'offre, " +
+      "les modalités de l'alternance (rythme, date de début, école s'ils sont connus), puis la demande " +
+      "d'entretien.\n" +
+      "- `email_subject` : objet court de l'email qui cite le poste et l'alternance.\n" +
+      "- `email_body` : l'email d'accompagnement, 80 à 140 mots, de « Bonjour » à la signature. Il " +
+      "présente la candidature en deux ou trois phrases avec un élément précis du profil, et indique que " +
+      "le CV et la lettre de motivation sont en pièces jointes.\n" +
+      "- `short_message` : 400 à 600 caractères, sans formule d'appel ni signature, à coller dans le " +
+      "champ « message » d'un formulaire de candidature ou dans un message LinkedIn.",
+  });
+}
+
+const TailoredCvSchema = z.object({
+  headline: z.string(),
+  summary: z.string(),
+  contact: z.array(z.string()),
+  skills: z.array(z.object({ category: z.string(), items: z.array(z.string()) })),
+  experiences: z.array(
+    z.object({
+      title: z.string(),
+      company: z.string(),
+      location: z.string(),
+      period: z.string(),
+      bullets: z.array(z.string()),
+    }),
+  ),
+  projects: z.array(
+    z.object({ name: z.string(), stack: z.string(), link: z.string(), bullets: z.array(z.string()) }),
+  ),
+  education: z.array(z.object({ degree: z.string(), school: z.string(), period: z.string(), details: z.string() })),
+  languages: z.array(z.string()),
+  interests: z.array(z.string()),
+  changes: z.array(z.string()),
+  not_added: z.array(z.string()),
+});
+
+/** Valide un CV adapté venu du navigateur avant de l'enregistrer. */
+export function parseTailoredCv(value: unknown): TailoredCv {
+  return TailoredCvSchema.parse(value);
+}
+
+/**
+ * Adapte le CV d'origine (PDF) à une offre. L'IA peut reformuler, réordonner et mettre en avant,
+ * jamais inventer : ce que l'offre demande et que le CV n'a pas part dans `not_added`.
+ * `instructions` et `previous` servent à retoucher une version déjà générée.
+ */
+export async function tailorCv(
+  profile: Profile,
+  offer: OfferRow,
+  cvPdfBase64: string,
+  options: { instructions?: string; previous?: TailoredCv | null } = {},
+): Promise<TailoredCv> {
+  const s = profile.search;
+  const retouch =
+    options.instructions?.trim() && options.previous
+      ? `\n\nVersion actuelle du CV adapté :\n${JSON.stringify(options.previous, null, 2)}\n\n` +
+        `Le candidat demande ces retouches : ${options.instructions.trim()}\n` +
+        "Pars de la version actuelle et applique ces retouches, toujours sans rien inventer."
+      : options.instructions?.trim()
+        ? `\n\nConsignes du candidat : ${options.instructions.trim()}`
+        : "";
+  return structured({
+    tier: "writing",
+    schema: TailoredCvSchema,
+    effort: "medium",
+    system:
+      "Tu adaptes le CV d'un étudiant qui cherche une alternance à une offre précise. Règle absolue : " +
+      "tu n'inventes rien, ni expérience, ni compétence, ni outil, ni diplôme, ni chiffre, ni date. Tu " +
+      "peux reformuler, réordonner, regrouper, mettre en avant ce qui correspond à l'offre, reprendre le " +
+      "vocabulaire de l'offre quand il désigne une chose réellement présente dans le CV, et raccourcir " +
+      "ou retirer ce qui n'aide pas pour ce poste. Tout ce que l'offre demande et que le CV ne montre " +
+      "pas va dans `not_added`, jamais dans le CV. Le CV doit tenir sur une page. Français.",
+    content: [
+      {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: cvPdfBase64 },
+        // Le même CV sert pour chaque offre : on le met en cache pour réduire le coût.
+        cache_control: { type: "ephemeral" },
+      },
+      {
+        type: "text",
+        text:
+          `Voici le CV d'origine du candidat (document ci-dessus).\n\n${offerBrief(offer)}\n\n` +
+          `Recherche : alternance ${s.keywords}, rythme ${s.rhythm || "non précisé"}, début ` +
+          `${s.start_date || "non précisé"}, école ${s.school || "non précisée"}.\n\n` +
+          "Rédige le CV adapté :\n" +
+          "- `headline` : le titre visé, par exemple « Développeur fullstack en alternance », suivi du " +
+          "rythme s'il est connu.\n" +
+          "- `summary` : 2 ou 3 phrases de profil orientées vers ce poste.\n" +
+          "- `contact` : la ville et les liens présents dans le CV (LinkedIn, GitHub, portfolio), sans " +
+          "l'email ni le téléphone.\n" +
+          "- `skills` : 3 à 5 catégories, les plus utiles pour l'offre en premier, uniquement des " +
+          "compétences présentes dans le CV.\n" +
+          "- `experiences` et `projects` : les plus pertinents en premier, 2 à 4 puces chacun qui " +
+          "commencent par un verbe d'action ; `stack` liste les technologies du projet.\n" +
+          "- `education`, `languages`, `interests` : repris du CV, abrégés si besoin.\n" +
+          "- `changes` : 3 à 6 phrases courtes qui expliquent au candidat ce qui a été adapté.\n" +
+          "- `not_added` : les compétences ou exigences de l'offre absentes du CV.\n" +
+          "Laisse une chaîne ou une liste vide quand une information n'existe pas dans le CV." +
+          retouch,
+      },
+    ],
   });
 }
 
@@ -215,6 +330,8 @@ export function toCvSummary(cv: ParsedCv): CvSummary {
 }
 
 // ---------- Relance ----------
+
+const LetterSchema = z.object({ subject: z.string(), body: z.string() });
 
 export async function writeFollowUp(
   profile: Profile,

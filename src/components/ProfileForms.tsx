@@ -89,14 +89,18 @@ export function ProfileForm({ profile }: { profile: Profile }) {
       <fieldset className="space-y-3">
         <legend className="mb-2 font-medium">Automatisations</legend>
         <p className="text-xs text-slate-500">
-          Chaque matin, l&apos;IA prépare les lettres des meilleures offres. Elles t&apos;attendent dans « Lettres prêtes » :
-          rien n&apos;est envoyé sans ta validation.
+          Chaque matin, l&apos;IA prépare le dossier des meilleures offres (lettre de motivation, email, message court et
+          CV adapté). Ils t&apos;attendent dans « Lettres prêtes » : rien n&apos;est envoyé sans ta validation.
         </p>
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Lettres préparées / jour" name="auto_letters" type="number" defaultValue={s.auto_letters} />
           <Field label="Score minimum" name="auto_letter_min_score" type="number" defaultValue={s.auto_letter_min_score} />
           <Field label="Relance après (jours)" name="follow_up_days" type="number" defaultValue={s.follow_up_days} />
         </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="auto_tailor_cv" defaultChecked={s.auto_tailor_cv} />
+          Adapter aussi mon CV à chacune de ces offres
+        </label>
       </fieldset>
 
       <button

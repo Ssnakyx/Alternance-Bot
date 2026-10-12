@@ -1,5 +1,6 @@
 import "server-only";
-import { scoreOffers, writeLetter } from "./claude";
+import { prepareDossier, type DossierPart } from "./application";
+import { scoreOffers } from "./claude";
 import { addEvent, getProfile, getUnscoredOffers, insertNewOffers, topOffersWithoutLetter, updateOffer } from "./db";
 import { syncInboxReplies } from "./inbox";
 import { fetchAllOffers } from "./sources";
@@ -49,29 +50,32 @@ export async function scorePendingOffers(profile: Profile, errors: string[]): Pr
   return scored;
 }
 
-/** Prépare les lettres des meilleures offres : elles t'attendent dans "Lettre prête", rien n'est envoyé. */
+/**
+ * Prépare le dossier des meilleures offres (lettre, email, message court et, si l'option est
+ * active, CV adapté) : il t'attend dans "Lettre prête", rien n'est envoyé.
+ */
 async function prepareTopLetters(profile: Profile, errors: string[]): Promise<number> {
-  const { auto_letters, auto_letter_min_score } = profile.search;
+  const { auto_letters, auto_letter_min_score, auto_tailor_cv } = profile.search;
   if (auto_letters <= 0) return 0;
   const offers = await topOffersWithoutLetter(auto_letter_min_score, auto_letters);
+  const parts: DossierPart[] = auto_tailor_cv ? ["texts", "cv"] : ["texts"];
   const settled = await Promise.allSettled(
     offers.map(async (offer) => {
-      const letter = await writeLetter(profile, offer);
-      await updateOffer(offer.id, { letter_subject: letter.subject, letter: letter.body, status: "draft" });
+      const { patch, errors: partErrors } = await prepareDossier(profile, offer, parts);
+      errors.push(...partErrors.map((e) => `${offer.company || offer.title} : ${e}`));
+      if (!patch.letter) throw new Error("dossier non préparé");
+      await updateOffer(offer.id, { ...patch, status: "draft" });
       await addEvent({
         offer_id: offer.id,
         type: "letter_generated",
         status: "draft",
-        summary: "Lettre préparée automatiquement, en attente de ta validation",
+        summary: patch.tailored_cv
+          ? "Lettre et CV adapté préparés automatiquement, en attente de ta validation"
+          : "Lettre préparée automatiquement, en attente de ta validation",
       });
     }),
   );
-  let prepared = 0;
-  for (const outcome of settled) {
-    if (outcome.status === "fulfilled") prepared++;
-    else errors.push(`lettre auto : ${describe(outcome.reason)}`);
-  }
-  return prepared;
+  return settled.filter((outcome) => outcome.status === "fulfilled").length;
 }
 
 /**

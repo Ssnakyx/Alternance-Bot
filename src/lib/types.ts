@@ -69,8 +69,15 @@ export interface OfferRow extends NormalizedOffer {
   gaps: string[];
   scored_at: string | null;
   status: OfferStatus;
+  /** Email d'accompagnement (objet et corps). */
   letter_subject: string | null;
   letter: string | null;
+  /** Lettre de motivation au format courrier, jointe en PDF. */
+  cover_letter_title: string | null;
+  cover_letter: string | null;
+  /** Message court pour les formulaires en ligne ou LinkedIn. */
+  short_message: string | null;
+  tailored_cv: TailoredCv | null;
   sent_at: string | null;
   followed_up_at: string | null;
   responded_at: string | null;
@@ -94,6 +101,8 @@ export interface SearchPrefs {
   auto_letters: number;
   /** Score minimum pour qu'une lettre soit préparée automatiquement. */
   auto_letter_min_score: number;
+  /** Adapte aussi le CV pour les offres préparées automatiquement. */
+  auto_tailor_cv: boolean;
   /** Nombre de jours sans réponse avant de proposer une relance. */
   follow_up_days: number;
 }
@@ -112,6 +121,7 @@ export const DEFAULT_SEARCH: SearchPrefs = {
   school: "",
   auto_letters: 5,
   auto_letter_min_score: 70,
+  auto_tailor_cv: true,
   follow_up_days: 7,
 };
 
@@ -123,6 +133,33 @@ export interface CvSummary {
   education: { degree: string; school: string; period: string }[];
   projects: { name: string; description: string }[];
   languages: string[];
+}
+
+/** CV réécrit par l'IA pour une offre précise, à partir du CV d'origine (rien d'inventé). */
+export interface TailoredCv {
+  headline: string;
+  summary: string;
+  /** Ville et liens (LinkedIn, GitHub, portfolio). L'email et le téléphone viennent du profil. */
+  contact: string[];
+  skills: { category: string; items: string[] }[];
+  experiences: { title: string; company: string; location: string; period: string; bullets: string[] }[];
+  projects: { name: string; stack: string; link: string; bullets: string[] }[];
+  education: { degree: string; school: string; period: string; details: string }[];
+  languages: string[];
+  interests: string[];
+  /** Ce que l'IA a changé par rapport au CV d'origine, pour que tu puisses vérifier. */
+  changes: string[];
+  /** Demandé par l'offre mais absent de ton CV : volontairement non ajouté. */
+  not_added: string[];
+}
+
+/** Les textes du dossier, tels qu'on les modifie dans la fiche offre. */
+export interface DossierTexts {
+  letter_subject: string;
+  letter: string;
+  cover_letter_title: string;
+  cover_letter: string;
+  short_message: string;
 }
 
 export interface Profile {

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
+    "@react-pdf/renderer": "^4.9.0",
     "@supabase/supabase-js": "^2.117.3",
     "imapflow": "^2.4.0",
     "mailparser": "^3.9.38",
