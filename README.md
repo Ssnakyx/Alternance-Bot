@@ -97,21 +97,24 @@ Vercel ne la prend en compte qu'au déploiement suivant.
 ## Coût de l'IA
 
 L'API Claude se paie à part (crédits prépayés sur la console Claude) : l'abonnement Claude Pro
-ou Max ne la couvre pas. Toute l'IA utilise **Claude Opus 5.5**. Une journée chargée (60 offres
-notées, 5 dossiers avec CV adapté) coûte environ 1 à 2 $ ; les jours suivants, il y a moins de
-nouvelles offres. Un dossier préparé à la main coûte environ 0,15 à 0,30 $. Pour dépenser moins,
+ou Max ne la couvre pas. Pour coûter peu, le tri des offres, la lecture du CV, celle des réponses
+et les recherches sur le web utilisent **Claude Haiku 5.5** ; les lettres, emails et CV adaptés,
+que lit le recruteur, utilisent **Claude Sonnet 5.5**. Une journée chargée (60 offres notées,
+5 dossiers avec CV adapté) coûte environ 0,30 à 0,60 $ ; les jours suivants, il y a moins de
+nouvelles offres. Un dossier préparé à la main coûte environ 0,05 à 0,15 $. Pour dépenser moins,
 baisse le nombre de dossiers préparés chaque matin ou décoche « Adapter aussi mon CV » dans le profil.
 
 Les recherches sur le web coûtent en plus 0,01 $ par recherche, plus la lecture des pages. La
 source « Recherche web » lance trois recherches en parallèle (sites d'emploi généralistes, sites
-tech et pages carrières, postes avec de l'IA) : compte environ 1 à 2 $ à chaque fois qu'elle
-tourne (le matin, et à chaque clic sur « Chercher de nouvelles offres »), et 0,10 à 0,25 $ par
+tech et pages carrières, postes avec de l'IA) : compte environ 0,30 à 0,50 $ à chaque fois qu'elle
+tourne (le matin, et à chaque clic sur « Chercher de nouvelles offres »), et environ 0,05 $ par
 adresse email cherchée (une seule fois par offre). Ce sont des ordres de grandeur, le détail
 exact est sur la console Claude.
 
-Pour réduire le coût, mets `CLAUDE_MODEL_FAST=claude-haiku-5-5` : le tri des offres, la lecture du
-CV et celle des réponses passent alors sur Haiku (environ 40 fois moins cher), et les lettres
-restent sur Opus. `CLAUDE_MODEL_WRITING` règle le modèle des lettres et relances.
+Les modèles se changent sans toucher au code, avec des variables Vercel : `CLAUDE_MODEL_FAST`
+(tri des offres, CV, réponses), `CLAUDE_MODEL_SEARCH` (recherches web) et `CLAUDE_MODEL_WRITING`
+(lettres, CV adaptés, relances). `claude-opus-5-5` donne la meilleure qualité, mais coûte environ
+2 fois plus que Sonnet et 40 fois plus que Haiku.
 
 ## Organisation du code
 
