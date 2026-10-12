@@ -6,20 +6,39 @@ import { z } from "zod";
 import type { CvSummary, OfferRow, Profile, SearchPrefs, TailoredCv } from "./types";
 
 /**
- * Modèle par type de tâche (Opus 5.5 partout par défaut) :
- * - "fast" pour le volume : lecture du CV, notes des offres, lecture des réponses ;
- * - "writing" pour ce que lit le recruteur : lettres et relances.
- * Modifiables sans toucher au code via CLAUDE_MODEL_FAST / CLAUDE_MODEL_WRITING
- * (par exemple claude-haiku-5-5 pour "fast", environ 40 fois moins cher).
+ * Modèle par type de tâche, choisi pour coûter peu :
+ * - "fast" (Haiku 5.5) pour le volume : lecture du CV, notes des offres, lecture des réponses ;
+ * - "search" (Haiku 5.5) pour les recherches sur le web : offres et adresses de recrutement ;
+ * - "writing" (Sonnet 5.5) pour ce que lit le recruteur : lettres, CV adaptés et relances.
+ * Modifiables sans toucher au code via CLAUDE_MODEL_FAST / CLAUDE_MODEL_SEARCH / CLAUDE_MODEL_WRITING
+ * (claude-opus-5-5 : meilleur, 2 fois plus cher que Sonnet et 40 fois plus que Haiku).
  */
 const MODELS = {
-  fast: process.env.CLAUDE_MODEL_FAST || "claude-opus-5-5",
-  writing: process.env.CLAUDE_MODEL_WRITING || "claude-opus-5-5",
+  fast: process.env.CLAUDE_MODEL_FAST || "claude-haiku-5-5",
+  search: process.env.CLAUDE_MODEL_SEARCH || "claude-haiku-5-5",
+  writing: process.env.CLAUDE_MODEL_WRITING || "claude-sonnet-5-5",
 };
 type Tier = keyof typeof MODELS;
 
 /** Modèles qui acceptent la relance automatique sur un autre modèle en cas de refus. */
 const SUPPORTS_FALLBACKS = new Set(["claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"]);
+
+/** Modèles dont la recherche web trie les résultats avant de les lire (versions 20260209 des outils). */
+const DYNAMIC_FILTERING = new Set([
+  "claude-fable-5-1",
+  "claude-fable-5",
+  "claude-opus-5-5",
+  "claude-opus-5",
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-5-5",
+  "claude-sonnet-5",
+  "claude-sonnet-4-6",
+]);
+
+/** Modèles qui refusent qu'on leur impose un outil (tool_choice "tool"). */
+const REJECTS_FORCED_TOOL = new Set(["claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5-5", "claude-sonnet-5-5"]);
 
 let client: Anthropic | null = null;
 function anthropic(): Anthropic {
@@ -353,7 +372,7 @@ export function toCvSummary(cv: ParsedCv): CvSummary {
  * Laisse l'IA chercher sur le web (recherche + lecture de pages, exécutées par Anthropic), puis
  * conclure en appelant l'outil `report` dont le schéma est garanti. Renvoie l'entrée de cet appel.
  * Au dernier tour, ou quand le temps alloué est presque écoulé, l'IA est obligée de conclure
- * avec ce qu'elle a trouvé.
+ * avec ce qu'elle a trouvé (sauf sur les modèles qui refusent qu'on leur impose un outil).
  */
 async function searchThenReport(opts: {
   system: string;
@@ -366,28 +385,33 @@ async function searchThenReport(opts: {
   budgetMs: number;
 }): Promise<unknown> {
   const deadline = Date.now() + opts.budgetMs;
+  const model = MODELS.search;
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: opts.prompt }];
-  const tools: Anthropic.ToolUnion[] = [
-    {
-      type: "web_search_20260209",
-      name: "web_search",
-      max_uses: opts.maxSearches,
-      user_location: { type: "approximate", country: "FR", city: "Lyon", timezone: "Europe/Paris" },
-    },
-    { type: "web_fetch_20260209", name: "web_fetch", max_uses: opts.maxFetches },
-    opts.report,
-  ];
+  const userLocation = { type: "approximate", country: "FR", city: "Lyon", timezone: "Europe/Paris" } as const;
+  // Pages lues limitées en taille : c'est le texte lu qui coûte le plus cher.
+  const maxContent = 15_000;
+  const webTools: Anthropic.ToolUnion[] = DYNAMIC_FILTERING.has(model)
+    ? [
+        { type: "web_search_20260209", name: "web_search", max_uses: opts.maxSearches, user_location: userLocation },
+        { type: "web_fetch_20260209", name: "web_fetch", max_uses: opts.maxFetches, max_content_tokens: maxContent },
+      ]
+    : [
+        { type: "web_search_20250305", name: "web_search", max_uses: opts.maxSearches, user_location: userLocation },
+        { type: "web_fetch_20250910", name: "web_fetch", max_uses: opts.maxFetches, max_content_tokens: maxContent },
+      ];
+  const tools: Anthropic.ToolUnion[] = [...webTools, opts.report];
+  const canForce = !REJECTS_FORCED_TOOL.has(model);
   const MAX_TURNS = 5;
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const remaining = deadline - Date.now();
     const last = turn === MAX_TURNS - 1 || remaining < 75_000;
     const response = await anthropic().messages.create(
       {
-        model: MODELS.fast,
+        model,
         max_tokens: opts.maxTokens,
         system: opts.system,
         tools,
-        tool_choice: last ? { type: "tool", name: opts.report.name } : { type: "auto" },
+        tool_choice: last && canForce ? { type: "tool", name: opts.report.name } : { type: "auto" },
         messages,
       },
       { timeout: Math.max(60_000, Math.min(150_000, remaining)) },

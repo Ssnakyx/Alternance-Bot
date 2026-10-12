@@ -112,7 +112,7 @@ export function ProfileForm({ profile }: { profile: Profile }) {
           <span>
             Chercher aussi sur LinkedIn, Indeed, Welcome to the Jungle, HelloWork...
             <span className="block text-xs text-slate-500">
-              L&apos;IA fait trois recherches web à chaque actualisation (environ 1 à 2 $ à chaque fois).
+              L&apos;IA fait trois recherches web à chaque actualisation (environ 0,30 à 0,50 $ à chaque fois).
             </span>
           </span>
         </label>

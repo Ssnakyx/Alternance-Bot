@@ -22,7 +22,7 @@ export function describeError(e: unknown): string {
     if (/credit balance/i.test(message)) {
       return "Crédit Anthropic épuisé : recharge-le sur console.anthropic.com, rubrique Billing.";
     }
-    if (e.status === 404) return `Modèle d'IA introuvable : vérifie CLAUDE_MODEL_FAST et CLAUDE_MODEL_WRITING (${message}).`;
+    if (e.status === 404) return `Modèle d'IA introuvable : vérifie CLAUDE_MODEL_FAST, CLAUDE_MODEL_SEARCH et CLAUDE_MODEL_WRITING (${message}).`;
     if (e.status === 429) return "Trop de demandes à l'IA en même temps (limite du compte Anthropic). Réessaie dans une minute.";
     if (e.status === 529 || e.status === 503) return "L'IA est surchargée en ce moment. Réessaie dans quelques minutes.";
     if (e.status && e.status >= 500) return "Erreur temporaire chez Anthropic. Réessaie dans quelques minutes.";
